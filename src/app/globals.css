@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-background: #0a0f1a;
+  --color-foreground: #e8edf7;
+  --color-card: #111827;
+  --color-card-hover: #1a2332;
+  --color-primary: #6366f1;
+  --color-primary-hover: #818cf8;
+  --color-accent: #22d3ee;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-muted: #94a3b8;
+  --color-border: #1e293b;
+  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.25), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(34, 211, 238, 0.12), transparent),
+    var(--color-background);
+  color: var(--color-foreground);
+  min-height: 100vh;
+  font-family: var(--font-sans);
+}
+
+.glass {
+  background: rgba(17, 24, 39, 0.72);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.glow-primary {
+  box-shadow: 0 0 40px rgba(99, 102, 241, 0.15);
+}
+
+.progress-ring {
+  transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(52, 211, 153, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(52, 211, 153, 0.6); }
+}
+
+.goal-complete {
+  animation: pulse-glow 2s ease-in-out infinite;
+}

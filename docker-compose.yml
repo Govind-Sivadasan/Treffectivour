@@ -1,0 +1,16 @@
+services:
+  treffectivour:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/data/treffectivour.db
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-use-long-random-string}
+      - DEFAULT_REQUIRED_HOURS=8
+      - HALF_DAY_REQUIRED_HOURS=4
+    volumes:
+      - treffectivour-data:/data
+    restart: unless-stopped
+
+volumes:
+  treffectivour-data:
