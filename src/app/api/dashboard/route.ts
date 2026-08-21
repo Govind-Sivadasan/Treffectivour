@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import {
-  aggregatePeriod,
+  aggregateWorkPeriod,
   enumerateDates,
   getDateKey,
   getMonthRange,
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       const { start, end } = getWeekRange(ref);
       const dates = enumerateDates(start, end);
       const daily = await getSummariesForRange(session.id, dates, now);
-      const stats = aggregatePeriod(daily);
+      const stats = aggregateWorkPeriod(daily);
       return NextResponse.json({ period: "week", stats, range: { start: dates[0], end: dates.at(-1) } });
     }
 
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       const { start, end } = getMonthRange(ref);
       const dates = enumerateDates(start, end);
       const daily = await getSummariesForRange(session.id, dates, now);
-      const stats = aggregatePeriod(daily);
+      const stats = aggregateWorkPeriod(daily);
       return NextResponse.json({ period: "month", stats, range: { start: dates[0], end: dates.at(-1) } });
     }
 

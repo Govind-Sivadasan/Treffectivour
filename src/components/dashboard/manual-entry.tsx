@@ -21,7 +21,9 @@ interface ManualEntryProps {
 export function ManualEntry({ date, onSuccess }: ManualEntryProps) {
   const [type, setType] = useState<"IN" | "OUT">("IN");
   const [time, setTime] = useState(DEFAULT_TIME_PICKER_VALUE);
-  const [dayType, setDayType] = useState<"FULL" | "HALF_DAY_LEAVE" | "SPECIAL">("FULL");
+  const [dayType, setDayType] = useState<
+    "FULL" | "HALF_DAY_LEAVE" | "FULL_DAY_LEAVE" | "SPECIAL"
+  >("FULL");
   const [requiredHours, setRequiredHours] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -89,11 +91,14 @@ export function ManualEntry({ date, onSuccess }: ManualEntryProps) {
             <Select
               value={dayType}
               onChange={(e) =>
-                setDayType(e.target.value as "FULL" | "HALF_DAY_LEAVE" | "SPECIAL")
+                setDayType(
+                  e.target.value as "FULL" | "HALF_DAY_LEAVE" | "FULL_DAY_LEAVE" | "SPECIAL"
+                )
               }
             >
               <option value="FULL">Full day (8h)</option>
               <option value="HALF_DAY_LEAVE">Half day leave (4h)</option>
+              <option value="FULL_DAY_LEAVE">Full day leave (0h)</option>
               <option value="SPECIAL">Special / custom hours</option>
             </Select>
           </div>

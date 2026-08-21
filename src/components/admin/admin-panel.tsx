@@ -4,21 +4,68 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatHours } from "@/lib/calculations";
+import { formatDate, formatTime } from "@/lib/utils";
 import { ArrowLeft, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+type AttendanceStatus = "off" | "absent" | "working" | "complete";
+
+type AdminUserRow = {
+  user: { id: string; name: string; email: string; role?: string };
+  today: {
+    status: AttendanceStatus;
+    effectiveHours: number;
+    requiredHours: number;
+    isComplete: boolean;
+    hasOpenSession?: boolean;
+    firstInAt: string | null;
+  };
+  week: {
+    totalEffectiveHours: number;
+    totalGrossHours: number;
+    daysTracked: number;
+    daysComplete: number;
+    workDaysInRange: number;
+    weeklyTargetHours: number;
+    isWeeklyTargetMet: boolean;
+    remainingHours: number;
+  };
+  month: {
+    totalEffectiveHours: number;
+    totalGrossHours: number;
+    daysTracked: number;
+    daysComplete: number;
+    workDaysInRange: number;
+    totalRequiredHours: number;
+  };
+};
+
+function statusBadge(status: AttendanceStatus) {
+  const styles: Record<AttendanceStatus, string> = {
+    absent: "bg-rose-500/20 text-rose-300",
+    working: "bg-amber-500/20 text-amber-300",
+    complete: "bg-emerald-500/20 text-emerald-300",
+    off: "bg-slate-500/20 text-slate-400",
+  };
+  const labels: Record<AttendanceStatus, string> = {
+    absent: "Absent",
+    working: "Working",
+    complete: "Complete",
+    off: "Weekend",
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}>
+      {labels[status]}
+    </span>
+  );
+}
+
 export function AdminPanel() {
-  const [users, setUsers] = useState<Array<{
-    user: { id: string; name: string; email: string; role?: string };
-    stats: {
-      totalEffectiveHours: number;
-      totalGrossHours: number;
-      daysTracked: number;
-      daysComplete: number;
-    };
-  }>>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [todayDate, setTodayDate] = useState("");
+  const [adminTab, setAdminTab] = useState<"today" | "week" | "month" | "manage">("today");
   const [specialDays, setSpecialDays] = useState<Array<{
     id: string;
     date: string;
@@ -46,12 +93,15 @@ export function AdminPanel() {
     const adminData = await adminRes.json();
     const specialData = await specialRes.json();
     setUsers(adminData.users ?? []);
+    setTodayDate(adminData.todayDate ?? "");
     setSpecialDays(specialData.days ?? []);
     setLoading(false);
   }, []);
 
   useEffect(() => {
     load();
+    const interval = setInterval(load, 60000);
+    return () => clearInterval(interval);
   }, [load]);
 
   async function addSpecialDay(e: React.FormEvent) {
@@ -177,8 +227,172 @@ export function AdminPanel() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["today", "Today"],
+              ["week", "This week"],
+              ["month", "This month"],
+              ["manage", "Manage users"],
+            ] as const
+          ).map(([id, label]) => (
+            <Button
+              key={id}
+              variant={adminTab === id ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setAdminTab(id)}
+            >
+              {label}
+            </Button>
+          ))}
+          <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
+            Refresh
+          </Button>
+        </div>
+
+        {adminTab === "today" && (
+          <Card>
+            <CardTitle className="mb-1">Who is working today</CardTitle>
+            <p className="text-sm text-[var(--color-muted)] mb-4">
+              {todayDate ? formatDate(todayDate) : "Today"} · Absent = no IN punch yet · Sat/Sun shown as weekend
+            </p>
+            {loading ? (
+              <div className="animate-pulse h-32 bg-white/5 rounded-xl" />
+            ) : users.length === 0 ? (
+              <p className="text-sm text-[var(--color-muted)]">No users found.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[var(--color-muted)] border-b border-[var(--color-border)]">
+                      <th className="py-2 pr-4">User</th>
+                      <th className="py-2 pr-4">Status</th>
+                      <th className="py-2 pr-4">Effective</th>
+                      <th className="py-2 pr-4">Required</th>
+                      <th className="py-2 pr-4">First IN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(({ user, today }) => (
+                      <tr key={user.id} className="border-b border-[var(--color-border)]/50">
+                        <td className="py-3 pr-4">
+                          <div className="font-medium">{user.name}</div>
+                          <div className="text-xs text-[var(--color-muted)]">{user.email}</div>
+                        </td>
+                        <td className="py-3 pr-4">{statusBadge(today.status)}</td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(today.effectiveHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums">{today.requiredHours}h</td>
+                        <td className="py-3 pr-4 tabular-nums text-[var(--color-muted)]">
+                          {today.firstInAt ? formatTime(new Date(today.firstInAt)) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {adminTab === "week" && (
+          <Card>
+            <CardTitle className="mb-1">Weekly status (Mon–Fri)</CardTitle>
+            <p className="text-sm text-[var(--color-muted)] mb-4">
+              40h weekly target · Sat/Sun excluded from totals
+            </p>
+            {loading ? (
+              <div className="animate-pulse h-32 bg-white/5 rounded-xl" />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[var(--color-muted)] border-b border-[var(--color-border)]">
+                      <th className="py-2 pr-4">User</th>
+                      <th className="py-2 pr-4">Effective</th>
+                      <th className="py-2 pr-4">Remaining</th>
+                      <th className="py-2 pr-4">Days complete</th>
+                      <th className="py-2 pr-4">40h goal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(({ user, week }) => (
+                      <tr key={user.id} className="border-b border-[var(--color-border)]/50">
+                        <td className="py-3 pr-4 font-medium">{user.name}</td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(week.totalEffectiveHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(week.remainingHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {week.daysComplete}/{week.workDaysInRange}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {week.isWeeklyTargetMet ? (
+                            <span className="text-emerald-300">Met</span>
+                          ) : (
+                            <span className="text-[var(--color-muted)]">In progress</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {adminTab === "month" && (
+          <Card>
+            <CardTitle className="mb-1">Monthly status (work days)</CardTitle>
+            <p className="text-sm text-[var(--color-muted)] mb-4">
+              Totals exclude Sat/Sun · Required = sum of daily targets on work days
+            </p>
+            {loading ? (
+              <div className="animate-pulse h-32 bg-white/5 rounded-xl" />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[var(--color-muted)] border-b border-[var(--color-border)]">
+                      <th className="py-2 pr-4">User</th>
+                      <th className="py-2 pr-4">Effective</th>
+                      <th className="py-2 pr-4">Gross</th>
+                      <th className="py-2 pr-4">Required</th>
+                      <th className="py-2 pr-4">Days complete</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(({ user, month }) => (
+                      <tr key={user.id} className="border-b border-[var(--color-border)]/50">
+                        <td className="py-3 pr-4 font-medium">{user.name}</td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(month.totalEffectiveHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(month.totalGrossHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums">
+                          {formatHours(month.totalRequiredHours * 3600000)}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {month.daysComplete}/{month.workDaysInRange}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {adminTab === "manage" && (
         <Card>
-          <CardTitle className="mb-4">All users — this month</CardTitle>
+          <CardTitle className="mb-4">Manage users</CardTitle>
           {loading ? (
             <div className="animate-pulse h-32 bg-white/5 rounded-xl" />
           ) : users.length === 0 ? (
@@ -196,7 +410,7 @@ export function AdminPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(({ user, stats }) =>
+                  {users.map(({ user, month }) =>
                     editingUserId === user.id ? (
                       <tr key={user.id} className="border-b border-indigo-500/30 bg-indigo-500/5">
                         <td colSpan={5} className="py-4 px-2">
@@ -274,13 +488,13 @@ export function AdminPanel() {
                           <div className="text-xs text-[var(--color-muted)]">{user.email}</div>
                         </td>
                         <td className="py-3 pr-4 tabular-nums">
-                          {formatHours(stats.totalEffectiveHours * 3600000)}
+                          {formatHours(month.totalEffectiveHours * 3600000)}
                         </td>
                         <td className="py-3 pr-4 tabular-nums">
-                          {formatHours(stats.totalGrossHours * 3600000)}
+                          {formatHours(month.totalGrossHours * 3600000)}
                         </td>
                         <td className="py-3 pr-4">
-                          {stats.daysComplete}/{stats.daysTracked}
+                          {month.daysComplete}/{month.workDaysInRange}
                         </td>
                         <td className="py-3 pr-4">
                           <div className="flex justify-end gap-1">
@@ -310,6 +524,7 @@ export function AdminPanel() {
             </div>
           )}
         </Card>
+        )}
 
         <Card>
           <CardTitle className="mb-4">Add user</CardTitle>

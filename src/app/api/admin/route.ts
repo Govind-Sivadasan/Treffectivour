@@ -1,62 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
+import { getAdminOverview } from "@/lib/admin-service";
 import { prisma } from "@/lib/db";
-import {
-  aggregatePeriod,
-  enumerateDates,
-  getMonthRange,
-  calculateFromPunches,
-} from "@/lib/calculations";
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     await requireAdmin();
-    const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "month";
-    const now = new Date();
-    const { start, end } = getMonthRange(now);
-    const dates = enumerateDates(start, end);
-
-    const users = await prisma.user.findMany({
-      where: { role: "USER" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        dayRecords: {
-          where: { date: { in: dates } },
-          include: { punches: { orderBy: { timestamp: "asc" } } },
-        },
-      },
-    });
-
-    const data = users.map((user) => {
-      const recordMap = new Map(user.dayRecords.map((r) => [r.date, r]));
-      const daily = dates.map((date) => {
-        const record = recordMap.get(date);
-        if (!record) return calculateFromPunches([], { date, now });
-        return calculateFromPunches(record.punches, {
-          date,
-          dayType: record.dayType,
-          requiredHours: record.requiredHours,
-          now,
-        });
-      });
-      const stats = aggregatePeriod(daily);
-      return {
-        user: { id: user.id, name: user.name, email: user.email, role: user.role },
-        stats: {
-          totalEffectiveHours: stats.totalEffectiveMs / 3600000,
-          totalGrossHours: stats.totalGrossMs / 3600000,
-          daysTracked: stats.daysTracked,
-          daysComplete: stats.daysComplete,
-        },
-        daily: daily.filter((d) => d.punches.length > 0),
-      };
-    });
-
-    return NextResponse.json({ period, users: data });
+    const overview = await getAdminOverview();
+    return NextResponse.json(overview);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
     if (msg === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

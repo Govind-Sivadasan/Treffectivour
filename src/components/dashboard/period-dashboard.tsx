@@ -2,7 +2,7 @@
 
 import { Card, CardTitle } from "@/components/ui/card";
 import { StatBadge } from "@/components/ui/progress-ring";
-import { formatHours } from "@/lib/calculations";
+import { formatDurationWithSeconds, formatHours } from "@/lib/calculations";
 import {
   Bar,
   BarChart,
@@ -18,6 +18,10 @@ interface PeriodStats {
   totalRequiredMs: number;
   daysTracked: number;
   daysComplete: number;
+  workDaysInRange?: number;
+  weeklyTargetMs?: number;
+  isWeeklyTargetMet?: boolean;
+  remainingToTargetMs?: number;
   daily: Array<{
     date: string;
     effectiveHours: number;
@@ -30,10 +34,12 @@ export function PeriodDashboard({
   title,
   stats,
   loading,
+  mode = "week",
 }: {
   title: string;
   stats: PeriodStats | null;
   loading: boolean;
+  mode?: "week" | "month";
 }) {
   if (loading || !stats) {
     return (
@@ -51,21 +57,50 @@ export function PeriodDashboard({
       required: d.requiredHours,
     }));
 
+  const isWeek = mode === "week";
+  const weeklyTargetMs = stats.weeklyTargetMs ?? 40 * 3600000;
+  const weeklyMet = stats.isWeeklyTargetMet ?? false;
+
   return (
     <Card>
-      <CardTitle className="mb-4">{title}</CardTitle>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <CardTitle>{title}</CardTitle>
+        {isWeek && weeklyMet && (
+          <span className="px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 text-sm font-medium">
+            40h weekly goal met
+          </span>
+        )}
+      </div>
+
+      {isWeek && (
+        <p className="text-xs text-[var(--color-muted)] mb-4">
+          Mon–Fri only · Sat/Sun excluded · Target {weeklyTargetMs / 3600000}h effective
+        </p>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatBadge label="Effective total" value={formatHours(stats.totalEffectiveMs)} />
+        <StatBadge label="Effective (work days)" value={formatHours(stats.totalEffectiveMs)} />
         <StatBadge label="Gross total" value={formatHours(stats.totalGrossMs)} />
+        {isWeek ? (
+          <StatBadge
+            label="Remaining to 40h"
+            value={formatDurationWithSeconds(stats.remainingToTargetMs ?? 0)}
+            variant={weeklyMet ? "success" : "warning"}
+          />
+        ) : (
+          <StatBadge
+            label="Required (work days)"
+            value={formatHours(stats.totalRequiredMs)}
+          />
+        )}
         <StatBadge
-          label="Days complete"
-          value={`${stats.daysComplete}/${stats.daysTracked}`}
-          variant={stats.daysComplete === stats.daysTracked ? "success" : "default"}
-        />
-        <StatBadge
-          label="Required total"
-          value={formatHours(stats.totalRequiredMs)}
+          label="Work days complete"
+          value={`${stats.daysComplete}/${stats.workDaysInRange ?? stats.daysTracked}`}
+          variant={
+            stats.daysComplete === (stats.workDaysInRange ?? stats.daysTracked)
+              ? "success"
+              : "default"
+          }
         />
       </div>
 

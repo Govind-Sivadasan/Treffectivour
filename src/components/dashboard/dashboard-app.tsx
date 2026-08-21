@@ -5,7 +5,7 @@ import { ManualEntry } from "@/components/dashboard/manual-entry";
 import { OcrUpload } from "@/components/dashboard/ocr-upload";
 import { PeriodDashboard } from "@/components/dashboard/period-dashboard";
 import { TodayPanel } from "@/components/dashboard/today-panel";
-import { useGoalNotification } from "@/hooks/use-goal-notification";
+import { useGoalNotification, useWeeklyGoalNotification } from "@/hooks/use-goal-notification";
 import { useLiveDaySummary, type ApiDaySummary } from "@/hooks/use-live-summary";
 import { cn } from "@/lib/utils";
 import {
@@ -67,6 +67,10 @@ export function DashboardApp({ user }: { user: User }) {
   const liveTodaySummary = useLiveDaySummary(todaySummary);
 
   useGoalNotification(liveTodaySummary);
+  useWeeklyGoalNotification(
+    weekStats as { isWeeklyTargetMet?: boolean; totalEffectiveMs?: number; weeklyTargetMs?: number } | null,
+    tab === "week"
+  );
 
   async function logout() {
     await fetch("/api/auth/login", { method: "DELETE" });
@@ -146,6 +150,7 @@ export function DashboardApp({ user }: { user: User }) {
             title="This week"
             stats={weekStats as Parameters<typeof PeriodDashboard>[0]["stats"]}
             loading={loading}
+            mode="week"
           />
         )}
 
@@ -154,6 +159,7 @@ export function DashboardApp({ user }: { user: User }) {
             title="This month"
             stats={monthStats as Parameters<typeof PeriodDashboard>[0]["stats"]}
             loading={loading}
+            mode="month"
           />
         )}
       </main>

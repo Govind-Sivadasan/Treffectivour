@@ -21,6 +21,7 @@ enum PunchType {
 enum DayType {
   FULL
   HALF_DAY_LEAVE
+  FULL_DAY_LEAVE
   SPECIAL
 }
 

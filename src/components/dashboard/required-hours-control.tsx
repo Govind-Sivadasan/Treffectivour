@@ -28,8 +28,8 @@ export function RequiredHoursControl({
 
   async function save(next?: string) {
     const parsed = parseFloat(next ?? hours);
-    if (Number.isNaN(parsed) || parsed <= 0 || parsed > 24) {
-      toast.error("Enter required hours between 0.5 and 24");
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 24) {
+      toast.error("Enter required hours between 0 and 24");
       setHours(String(value));
       return;
     }
@@ -42,7 +42,14 @@ export function RequiredHoursControl({
         body: JSON.stringify({
           date,
           requiredHours: parsed,
-          dayType: parsed === 4 ? "HALF_DAY_LEAVE" : parsed === 8 ? "FULL" : "SPECIAL",
+          dayType:
+            parsed === 0
+              ? "FULL_DAY_LEAVE"
+              : parsed === 4
+                ? "HALF_DAY_LEAVE"
+                : parsed === 8
+                  ? "FULL"
+                  : "SPECIAL",
         }),
       });
       if (!res.ok) {
@@ -68,7 +75,7 @@ export function RequiredHoursControl({
           <Input
             type="number"
             step="0.5"
-            min="0.5"
+            min="0"
             max="24"
             value={hours}
             disabled={saving}
@@ -85,10 +92,13 @@ export function RequiredHoursControl({
             className="py-2 text-center font-semibold tabular-nums"
           />
         </div>
+        {dayType === "FULL_DAY_LEAVE" && (
+          <span className="text-[10px] text-[var(--color-muted)] pb-2.5">full leave</span>
+        )}
         {dayType === "HALF_DAY_LEAVE" && (
           <span className="text-[10px] text-[var(--color-muted)] pb-2.5">half day</span>
         )}
-        {value !== 8 && (
+        {value !== 8 && value !== 0 && (
           <button
             type="button"
             onClick={() => {

@@ -15,6 +15,15 @@ export const DEFAULT_REQUIRED_HOURS = Number(
 export const HALF_DAY_REQUIRED_HOURS = Number(
   process.env.HALF_DAY_REQUIRED_HOURS || 4
 );
+export const FULL_DAY_LEAVE_REQUIRED_HOURS = 0;
+
+export function formatDurationWithSeconds(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m ${seconds.toString().padStart(2, "0")}s`;
+}
 
 export interface ParsedPunch {
   type: PunchType;
@@ -60,6 +69,7 @@ export function getRequiredHours(
   customRequired?: number
 ): number {
   if (customRequired !== undefined) return customRequired;
+  if (dayType === "FULL_DAY_LEAVE") return FULL_DAY_LEAVE_REQUIRED_HOURS;
   if (dayType === "HALF_DAY_LEAVE") return HALF_DAY_REQUIRED_HOURS;
   return DEFAULT_REQUIRED_HOURS;
 }
@@ -175,6 +185,32 @@ export function parseTimeOnDate(
   return result;
 }
 
+export const WEEKLY_WORK_TARGET_HOURS = Number(
+  process.env.WEEKLY_WORK_TARGET_HOURS || 40
+);
+
+export function isWeekendDate(dateKey: string): boolean {
+  const day = parseISO(`${dateKey}T12:00:00`).getDay();
+  return day === 0 || day === 6;
+}
+
+export function filterWorkDays(daily: DaySummary[]): DaySummary[] {
+  return daily.filter((d) => !isWeekendDate(d.date));
+}
+
+export type AttendanceStatus = "off" | "absent" | "working" | "complete";
+
+export function getAttendanceStatus(
+  summary: Pick<DaySummary, "punches" | "isComplete">,
+  dateKey: string
+): AttendanceStatus {
+  if (isWeekendDate(dateKey)) return "off";
+  const hasIn = summary.punches.some((p) => p.type === "IN");
+  if (!hasIn) return "absent";
+  if (summary.isComplete) return "complete";
+  return "working";
+}
+
 export interface PeriodStats {
   totalEffectiveMs: number;
   totalGrossMs: number;
@@ -182,6 +218,13 @@ export interface PeriodStats {
   daysTracked: number;
   daysComplete: number;
   daily: DaySummary[];
+}
+
+export interface WorkPeriodStats extends PeriodStats {
+  workDaysInRange: number;
+  weeklyTargetMs: number;
+  isWeeklyTargetMet: boolean;
+  remainingToTargetMs: number;
 }
 
 export function aggregatePeriod(daily: DaySummary[]): PeriodStats {
@@ -203,4 +246,22 @@ export function aggregatePeriod(daily: DaySummary[]): PeriodStats {
       daily: [] as DaySummary[],
     }
   );
+}
+
+export function aggregateWorkPeriod(
+  daily: DaySummary[],
+  options?: { weeklyTargetHours?: number }
+): WorkPeriodStats {
+  const workDays = filterWorkDays(daily);
+  const base = aggregatePeriod(workDays);
+  const weeklyTargetMs =
+    (options?.weeklyTargetHours ?? WEEKLY_WORK_TARGET_HOURS) * 3600000;
+
+  return {
+    ...base,
+    workDaysInRange: workDays.length,
+    weeklyTargetMs,
+    isWeeklyTargetMet: base.totalEffectiveMs >= weeklyTargetMs,
+    remainingToTargetMs: Math.max(0, weeklyTargetMs - base.totalEffectiveMs),
+  };
 }

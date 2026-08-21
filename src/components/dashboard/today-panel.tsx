@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ProgressRing, StatBadge } from "@/components/ui/progress-ring";
-import { formatHours } from "@/lib/calculations";
+import { formatDurationWithSeconds, formatHours } from "@/lib/calculations";
 import { formatDate } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 import { PunchEditRow } from "@/components/dashboard/punch-edit-row";
@@ -47,7 +47,8 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
         <div>
           <CardTitle>Today — {formatDate(summary.date)}</CardTitle>
           <p className="text-sm text-[var(--color-muted)] mt-1">
-            {summary.dayType === "HALF_DAY_LEAVE" && "Half day leave · "}
+            {summary.dayType === "FULL_DAY_LEAVE" && "Full day leave (0h) · "}
+            {summary.dayType === "HALF_DAY_LEAVE" && "Half day leave (4h) · "}
             {summary.dayType === "SPECIAL" && "Custom target · "}
             Default is 8h — change Required (h) to customize
           </p>
@@ -92,7 +93,7 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
           )}
           <StatBadge
             label="Remaining"
-            value={formatHours(
+            value={formatDurationWithSeconds(
               Math.max(0, summary.requiredHours * 3600000 - summary.effectiveMs)
             )}
             variant={summary.isComplete ? "success" : "warning"}

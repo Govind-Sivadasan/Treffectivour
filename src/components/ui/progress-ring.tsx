@@ -22,7 +22,7 @@ export function ProgressRing({
 }) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  const pct = max > 0 ? Math.min(value / max, 1) : complete ? 1 : 0;
   const offset = circumference * (1 - pct);
 
   return (
