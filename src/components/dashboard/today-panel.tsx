@@ -195,9 +195,6 @@ export function LoginForm() {
           {loading ? "Signing in..." : "Sign in"}
         </Button>
       </form>
-      <p className="mt-4 text-xs text-[var(--color-muted)] text-center">
-        Demo: user@treffectivour.local / user123 · Admin: admin@treffectivour.local / admin123
-      </p>
     </Card>
   );
 }

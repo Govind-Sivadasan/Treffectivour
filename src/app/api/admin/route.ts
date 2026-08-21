@@ -23,6 +23,7 @@ export async function GET(request: Request) {
         id: true,
         name: true,
         email: true,
+        role: true,
         dayRecords: {
           where: { date: { in: dates } },
           include: { punches: { orderBy: { timestamp: "asc" } } },
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
       });
       const stats = aggregatePeriod(daily);
       return {
-        user: { id: user.id, name: user.name, email: user.email },
+        user: { id: user.id, name: user.name, email: user.email, role: user.role },
         stats: {
           totalEffectiveHours: stats.totalEffectiveMs / 3600000,
           totalGrossHours: stats.totalGrossMs / 3600000,
