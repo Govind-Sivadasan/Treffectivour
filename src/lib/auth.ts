@@ -9,6 +9,11 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "dev-secret-change-me"
 );
 
+/** Use COOKIE_SECURE=true only behind HTTPS. LAN/HTTP Docker must leave this false. */
+function isSecureCookie(): boolean {
+  return process.env.COOKIE_SECURE === "true";
+}
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -39,7 +44,7 @@ export async function createSession(user: SessionUser) {
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureCookie(),
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7,

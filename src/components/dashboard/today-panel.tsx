@@ -8,7 +8,6 @@ import { formatDate } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 import { PunchEditRow } from "@/components/dashboard/punch-edit-row";
 import { RequiredHoursControl } from "@/components/dashboard/required-hours-control";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { ApiDaySummary } from "@/hooks/use-live-summary";
@@ -20,8 +19,6 @@ interface TodayPanelProps {
 }
 
 export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
-  const router = useRouter();
-
   async function deletePunch(punchId: string) {
     if (!summary) return;
     const res = await fetch(
@@ -134,7 +131,6 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
 }
 
 export function LoginForm() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -146,6 +142,7 @@ export function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
@@ -154,8 +151,7 @@ export function LoginForm() {
         return;
       }
       toast.success(`Welcome, ${data.user.name}`);
-      router.push("/dashboard");
-      router.refresh();
+      window.location.href = "/dashboard";
     } catch {
       toast.error("Login failed");
     } finally {
