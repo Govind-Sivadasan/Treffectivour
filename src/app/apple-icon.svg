@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" fill="none">
+  <rect width="180" height="180" rx="40" fill="#111827"/>
+  <circle cx="90" cy="90" r="62" stroke="#1e293b" stroke-width="14"/>
+  <path
+    d="M90 28a62 62 0 0 1 53.7 31"
+    stroke="url(#ring)"
+    stroke-width="14"
+    stroke-linecap="round"
+  />
+  <path
+    d="M90 28a62 62 0 0 1 62 62"
+    stroke="url(#ring2)"
+    stroke-width="14"
+    stroke-linecap="round"
+    opacity="0.85"
+  />
+  <path
+    d="M90 62v28l20 11"
+    stroke="#e8edf7"
+    stroke-width="11"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="90" cy="90" r="7" fill="#22d3ee"/>
+  <defs>
+    <linearGradient id="ring" x1="90" y1="28" x2="152" y2="90" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+    <linearGradient id="ring2" x1="90" y1="28" x2="152" y2="152" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+</svg>
