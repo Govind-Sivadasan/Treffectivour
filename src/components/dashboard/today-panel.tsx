@@ -3,8 +3,8 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { ProgressRing, StatBadge } from "@/components/ui/progress-ring";
-import { formatDurationWithSeconds, formatHours } from "@/lib/calculations";
-import { formatDate } from "@/lib/utils";
+import { formatDurationWithSeconds, formatHours, getLeaveTimeInfo } from "@/lib/calculations";
+import { formatDate, formatTime } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 import { PunchEditRow } from "@/components/dashboard/punch-edit-row";
 import { RequiredHoursControl } from "@/components/dashboard/required-hours-control";
@@ -40,6 +40,24 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
       </Card>
     );
   }
+
+  const leave = getLeaveTimeInfo(summary, new Date());
+  const leaveLabel =
+    leave.status === "leave_day"
+      ? "Can leave"
+      : leave.status === "now"
+        ? "Can leave since"
+        : leave.status === "scheduled"
+          ? "Can leave at"
+          : "Can leave at";
+  const leaveValue =
+    leave.status === "leave_day"
+      ? "Anytime"
+      : leave.status === "clock_in"
+        ? "Clock in first"
+        : leave.at
+          ? formatTime(leave.at)
+          : "—";
 
   return (
     <Card glow className="col-span-full lg:col-span-2">
@@ -81,13 +99,14 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
           complete={summary.isComplete}
         />
 
-        <div className="flex-1 grid grid-cols-2 gap-3 w-full">
+        <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full min-w-0">
           <StatBadge
-            label={summary.hasOpenSession ? "Gross (1st IN → now)" : "Gross (1st IN → last OUT)"}
+            label="Gross"
+            hint={summary.hasOpenSession ? "1st IN → now" : "1st IN → last OUT"}
             value={formatHours(summary.grossMs)}
           />
           {summary.hasOpenSession && (
-            <p className="col-span-2 text-[11px] text-[var(--color-accent)] -mt-1">
+            <p className="col-span-1 sm:col-span-2 text-[11px] text-[var(--color-accent)] -mt-1">
               Gross spans from first clock-in to current time · effective excludes breaks
             </p>
           )}
@@ -97,6 +116,17 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
               Math.max(0, summary.requiredHours * 3600000 - summary.effectiveMs)
             )}
             variant={summary.isComplete ? "success" : "warning"}
+          />
+          <StatBadge
+            label={leaveLabel}
+            value={leaveValue}
+            variant={
+              leave.status === "leave_day" || leave.status === "now"
+                ? "success"
+                : leave.status === "scheduled"
+                  ? "warning"
+                  : "default"
+            }
           />
           <StatBadge label="Required" value={`${summary.requiredHours}h`} />
           <StatBadge label="Punches" value={String(summary.punches.length)} />

@@ -25,6 +25,69 @@ export function formatDurationWithSeconds(ms: number): string {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
+export type LeaveTimeStatus = "leave_day" | "now" | "scheduled" | "clock_in";
+
+export interface LeaveTimeInfo {
+  at: Date | null;
+  status: LeaveTimeStatus;
+}
+
+function computeGoalMetAt(
+  pairs: Array<{ in: Date | string; out: Date | string | null }>,
+  requiredMs: number,
+  now: Date
+): Date | null {
+  let cumulative = 0;
+
+  for (const pair of pairs) {
+    const pairIn = pair.in instanceof Date ? pair.in : new Date(pair.in);
+    const end =
+      pair.out == null ? now : pair.out instanceof Date ? pair.out : new Date(pair.out);
+    const durationMs = Math.max(0, end.getTime() - pairIn.getTime());
+    if (cumulative + durationMs >= requiredMs) {
+      const neededMs = requiredMs - cumulative;
+      return new Date(pairIn.getTime() + neededMs);
+    }
+    cumulative += durationMs;
+  }
+
+  return null;
+}
+
+export function getLeaveTimeInfo(
+  summary: {
+    effectiveMs: number;
+    requiredHours: number;
+    isComplete: boolean;
+    hasOpenSession?: boolean;
+    pairs: Array<{ in: Date | string; out: Date | string | null }>;
+  },
+  now: Date
+): LeaveTimeInfo {
+  const requiredMs = summary.requiredHours * 3600000;
+
+  if (summary.requiredHours === 0) {
+    return { at: now, status: "leave_day" };
+  }
+
+  if (summary.isComplete) {
+    return {
+      at: computeGoalMetAt(summary.pairs, requiredMs, now) ?? now,
+      status: "now",
+    };
+  }
+
+  if (summary.hasOpenSession) {
+    const remainingMs = Math.max(0, requiredMs - summary.effectiveMs);
+    return {
+      at: new Date(now.getTime() + remainingMs),
+      status: "scheduled",
+    };
+  }
+
+  return { at: null, status: "clock_in" };
+}
+
 export interface ParsedPunch {
   type: PunchType;
   timestamp: Date;

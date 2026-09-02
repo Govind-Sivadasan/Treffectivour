@@ -69,16 +69,32 @@ export function ProgressRing({
 
 export function StatBadge({
   label,
+  hint,
   value,
   variant = "default",
+  className,
 }: {
   label: string;
+  hint?: string;
   value: string;
   variant?: "default" | "success" | "warning";
+  className?: string;
 }) {
   return (
-    <div className="rounded-xl bg-black/30 border border-[var(--color-border)] px-4 py-3">
-      <div className="text-xs text-[var(--color-muted)] uppercase tracking-wide">{label}</div>
+    <div
+      className={cn(
+        "rounded-xl bg-black/30 border border-[var(--color-border)] px-4 py-3 min-w-0",
+        className
+      )}
+    >
+      <div className="text-xs text-[var(--color-muted)] uppercase tracking-wide leading-snug break-words">
+        {label}
+      </div>
+      {hint && (
+        <div className="text-[12px] text-[var(--color-muted)] normal-case tracking-normal mt-0.5 leading-snug">
+          {hint}
+        </div>
+      )}
       <div
         className={cn(
           "text-lg font-semibold mt-0.5 tabular-nums",

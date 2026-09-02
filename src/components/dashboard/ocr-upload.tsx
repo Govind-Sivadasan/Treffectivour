@@ -196,18 +196,19 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
   }, [preview]);
 
   return (
-    <Card>
+    <Card className="min-w-0 overflow-hidden">
       <CardTitle className="flex items-center gap-2 mb-4">
-        <ImageIcon className="w-5 h-5 text-[var(--color-accent)]" />
+        <ImageIcon className="w-5 h-5 text-[var(--color-accent)] shrink-0" />
         Screenshot Import
       </CardTitle>
 
-      <div className="mb-4">
+      <div className="mb-4 min-w-0">
         <Label>Date override (if OCR misses it)</Label>
         <Input
           type="date"
           value={overrideDate}
           onChange={(e) => setOverrideDate(e.target.value)}
+          className="min-w-0 max-w-full box-border"
         />
       </div>
 

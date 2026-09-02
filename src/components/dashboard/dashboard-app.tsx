@@ -138,7 +138,7 @@ export function DashboardApp({ user }: { user: User }) {
               loading={loading}
               onRefresh={refresh}
             />
-            <div className="space-y-6">
+            <div className="space-y-6 min-w-0">
               <OcrUpload date={todayDate} onSuccess={refresh} />
               <ManualEntry date={todayDate} onSuccess={refresh} />
             </div>
