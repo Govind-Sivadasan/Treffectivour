@@ -2,7 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { Input, Label } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
+import { Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { timeStringToDate } from "@/lib/time-local";
 import {
@@ -202,14 +203,14 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
         Screenshot Import
       </CardTitle>
 
-      <div className="mb-4 min-w-0">
+      <div className="mb-4 min-w-0 w-full">
         <Label>Date override (if OCR misses it)</Label>
-        <Input
-          type="date"
+        <DateField
           value={overrideDate}
-          onChange={(e) => setOverrideDate(e.target.value)}
-          className="min-w-0 max-w-full box-border"
+          onChange={setOverrideDate}
+          className="w-full"
         />
+        <p className="text-[10px] text-[var(--color-muted)] mt-1">Format: YYYY-MM-DD</p>
       </div>
 
       {!preview && (

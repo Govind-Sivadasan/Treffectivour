@@ -1,12 +1,14 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { DayDatePicker } from "@/components/dashboard/day-date-picker";
 import { ManualEntry } from "@/components/dashboard/manual-entry";
 import { OcrUpload } from "@/components/dashboard/ocr-upload";
 import { PeriodDashboard } from "@/components/dashboard/period-dashboard";
 import { TodayPanel } from "@/components/dashboard/today-panel";
 import { useGoalNotification, useWeeklyGoalNotification } from "@/hooks/use-goal-notification";
 import { useLiveDaySummary, type ApiDaySummary } from "@/hooks/use-live-summary";
+import { getDateKey } from "@/lib/calculations";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
@@ -33,10 +35,12 @@ export function DashboardApp({ user }: { user: User }) {
   const [weekStats, setWeekStats] = useState<Record<string, unknown> | null>(null);
   const [monthStats, setMonthStats] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
-  const todayDate = new Date().toISOString().slice(0, 10);
+  const todayDate = getDateKey();
+  const [selectedDate, setSelectedDate] = useState(todayDate);
+  const isViewingToday = selectedDate === todayDate;
 
-  const fetchToday = useCallback(async () => {
-    const res = await fetch("/api/dashboard?period=today");
+  const fetchDay = useCallback(async (date: string) => {
+    const res = await fetch(`/api/dashboard?period=today&date=${date}`);
     const data = await res.json();
     setTodaySummary(data.summary ?? null);
   }, []);
@@ -54,19 +58,28 @@ export function DashboardApp({ user }: { user: User }) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchToday(), fetchPeriods()]);
+    await Promise.all([fetchDay(selectedDate), fetchPeriods()]);
     setLoading(false);
-  }, [fetchToday, fetchPeriods]);
+  }, [fetchDay, fetchPeriods, selectedDate]);
 
   useEffect(() => {
-    refresh();
-    const interval = setInterval(fetchToday, 30000);
+    setLoading(true);
+    fetchDay(selectedDate).finally(() => setLoading(false));
+  }, [selectedDate, fetchDay]);
+
+  useEffect(() => {
+    fetchPeriods();
+  }, [fetchPeriods]);
+
+  useEffect(() => {
+    if (!isViewingToday) return;
+    const interval = setInterval(() => fetchDay(selectedDate), 30000);
     return () => clearInterval(interval);
-  }, [refresh, fetchToday]);
+  }, [fetchDay, selectedDate, isViewingToday]);
 
-  const liveTodaySummary = useLiveDaySummary(todaySummary);
+  const liveDaySummary = useLiveDaySummary(todaySummary, isViewingToday);
 
-  useGoalNotification(liveTodaySummary);
+  useGoalNotification(isViewingToday ? liveDaySummary : null);
   useWeeklyGoalNotification(
     weekStats as { isWeeklyTargetMet?: boolean; totalEffectiveMs?: number; weeklyTargetMs?: number } | null,
     tab === "week"
@@ -132,15 +145,28 @@ export function DashboardApp({ user }: { user: User }) {
         </div>
 
         {tab === "today" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <TodayPanel
-              summary={liveTodaySummary}
-              loading={loading}
-              onRefresh={refresh}
+          <div className="space-y-4">
+            <DayDatePicker
+              value={selectedDate}
+              onChange={setSelectedDate}
+              max={todayDate}
             />
-            <div className="space-y-6 min-w-0">
-              <OcrUpload date={todayDate} onSuccess={refresh} />
-              <ManualEntry date={todayDate} onSuccess={refresh} />
+            {!isViewingToday && (
+              <p className="text-sm text-[var(--color-muted)]">
+                Viewing a past day — edit punches, add a missing OUT, or import a screenshot for this date.
+              </p>
+            )}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
+              <TodayPanel
+                summary={liveDaySummary}
+                loading={loading}
+                onRefresh={refresh}
+                isToday={isViewingToday}
+              />
+              <div className="space-y-6 min-w-0">
+                <OcrUpload date={selectedDate} onSuccess={refresh} />
+                <ManualEntry date={selectedDate} onSuccess={refresh} />
+              </div>
             </div>
           </div>
         )}

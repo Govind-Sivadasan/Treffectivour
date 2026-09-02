@@ -1,6 +1,6 @@
 "use client";
 
-import { calculateFromPunches } from "@/lib/calculations";
+import { calculateFromPunches, getEffectiveNowForDate } from "@/lib/calculations";
 import type { DayType } from "@prisma/client";
 import { useEffect, useMemo, useState } from "react";
 
@@ -57,7 +57,7 @@ function computeSummary(api: ApiDaySummary, now: Date): ApiDaySummary {
   };
 }
 
-export function useLiveDaySummary(apiSummary: ApiDaySummary | null) {
+export function useLiveDaySummary(apiSummary: ApiDaySummary | null, live = true) {
   const [now, setNow] = useState(() => new Date());
 
   const hasOpenSession = useMemo(() => {
@@ -69,14 +69,22 @@ export function useLiveDaySummary(apiSummary: ApiDaySummary | null) {
   }, [apiSummary]);
 
   useEffect(() => {
+    if (!live) return;
+
     setNow(new Date());
     const ms = hasOpenSession ? 1000 : 30000;
     const interval = setInterval(() => setNow(new Date()), ms);
     return () => clearInterval(interval);
-  }, [hasOpenSession, apiSummary?.punches]);
+  }, [hasOpenSession, apiSummary?.punches, live]);
+
+  const effectiveNow = useMemo(() => {
+    if (!apiSummary) return new Date();
+    if (!live) return getEffectiveNowForDate(apiSummary.date);
+    return now;
+  }, [apiSummary, live, now]);
 
   return useMemo(() => {
     if (!apiSummary) return null;
-    return computeSummary(apiSummary, now);
-  }, [apiSummary, now]);
+    return computeSummary(apiSummary, effectiveNow);
+  }, [apiSummary, effectiveNow]);
 }

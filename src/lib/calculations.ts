@@ -206,6 +206,30 @@ export function getDateKey(date: Date = new Date()): string {
   return format(date, "yyyy-MM-dd");
 }
 
+export function shiftDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return format(addDays(new Date(y, m - 1, d), days), "yyyy-MM-dd");
+}
+
+export function parseDateKey(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return format(dt, "yyyy-MM-dd");
+}
+
+/** Cap "now" at end-of-day for past dates so open sessions don't bleed into today. */
+export function getEffectiveNowForDate(dateKey: string, now = new Date()): Date {
+  const todayKey = getDateKey(now);
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (dateKey === todayKey) return now;
+  if (dateKey < todayKey) {
+    return new Date(y, m - 1, d, 23, 59, 59, 999);
+  }
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
 export function getWeekRange(reference: Date = new Date()) {
   const start = startOfWeek(reference, { weekStartsOn: 1 });
   const end = endOfWeek(reference, { weekStartsOn: 1 });

@@ -16,9 +16,10 @@ interface TodayPanelProps {
   summary: ApiDaySummary | null;
   loading: boolean;
   onRefresh: () => void;
+  isToday?: boolean;
 }
 
-export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
+export function TodayPanel({ summary, loading, onRefresh, isToday = true }: TodayPanelProps) {
   async function deletePunch(punchId: string) {
     if (!summary) return;
     const res = await fetch(
@@ -63,7 +64,9 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
     <Card glow className="col-span-full lg:col-span-2">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
-          <CardTitle>Today — {formatDate(summary.date)}</CardTitle>
+          <CardTitle>
+            {isToday ? "Today" : "Day"} — {formatDate(summary.date)}
+          </CardTitle>
           <p className="text-sm text-[var(--color-muted)] mt-1">
             {summary.dayType === "FULL_DAY_LEAVE" && "Full day leave (0h) · "}
             {summary.dayType === "HALF_DAY_LEAVE" && "Half day leave (4h) · "}
@@ -154,7 +157,9 @@ export function TodayPanel({ summary, loading, onRefresh }: TodayPanelProps) {
 
       {(summary.hasOpenSession || summary.pairs.some((p) => !p.out)) && (
         <p className="mt-4 text-xs text-[var(--color-accent)]">
-          Open session — OUT missing. Effective and gross count automatically to the current time.
+          {isToday
+            ? "Open session — OUT missing. Effective and gross count automatically to the current time."
+            : "Open session — add an OUT punch below (manual entry or edit) to close this day."}
         </p>
       )}
     </Card>

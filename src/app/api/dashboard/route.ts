@@ -4,6 +4,7 @@ import {
   aggregateWorkPeriod,
   enumerateDates,
   getDateKey,
+  getEffectiveNowForDate,
   getMonthRange,
   getWeekRange,
 } from "@/lib/calculations";
@@ -19,8 +20,9 @@ export async function GET(request: Request) {
 
     if (period === "today") {
       const date = dateParam || getDateKey(now);
-      const summary = await getDaySummary(session.id, date, now);
-      return NextResponse.json({ period: "today", summary });
+      const effectiveNow = getEffectiveNowForDate(date, now);
+      const summary = await getDaySummary(session.id, date, effectiveNow);
+      return NextResponse.json({ period: "today", summary, date });
     }
 
     const ref = dateParam ? new Date(`${dateParam}T12:00:00`) : now;

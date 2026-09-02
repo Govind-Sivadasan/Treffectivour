@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { DayType, PunchType } from "@prisma/client";
 import { requireSession } from "@/lib/auth";
-import { parseTimeOnDate } from "@/lib/calculations";
+import { parseTimeOnDate, getEffectiveNowForDate } from "@/lib/calculations";
 import { prisma } from "@/lib/db";
 import { getDaySummary, getOrCreateDayRecord } from "@/lib/day-service";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const session = await requireSession();
     const date = new URL(request.url).searchParams.get("date");
     if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
-    const summary = await getDaySummary(session.id, date);
+    const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
     return NextResponse.json({ summary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const summary = await getDaySummary(session.id, date);
+    const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
     return NextResponse.json({ summary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
@@ -120,7 +120,7 @@ export async function PUT(request: Request) {
       data,
     });
 
-    const summary = await getDaySummary(session.id, date);
+    const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
     return NextResponse.json({ summary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
@@ -138,7 +138,7 @@ export async function PATCH(request: Request) {
     if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
     await getOrCreateDayRecord(session.id, date, { dayType, requiredHours, notes });
-    const summary = await getDaySummary(session.id, date);
+    const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
     return NextResponse.json({ summary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";
@@ -162,7 +162,7 @@ export async function DELETE(request: Request) {
     if (!punch) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     await prisma.punch.delete({ where: { id: punchId } });
-    const summary = await getDaySummary(session.id, date);
+    const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
     return NextResponse.json({ summary });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Error";

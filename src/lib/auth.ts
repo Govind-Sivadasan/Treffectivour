@@ -68,14 +68,11 @@ export async function getSession(): Promise<SessionUser | null> {
       select: { id: true, email: true, name: true, role: true },
     });
 
-    if (!user) {
-      cookieStore.delete(COOKIE_NAME);
-      return null;
-    }
+    if (!user) return null;
 
     return user;
   } catch {
-    cookieStore.delete(COOKIE_NAME);
+    // Read-only: Server Components cannot modify cookies (Next.js 15).
     return null;
   }
 }
