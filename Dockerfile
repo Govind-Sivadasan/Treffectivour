@@ -10,10 +10,10 @@ RUN npm ci
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV DATABASE_URL="file:./prod.db"
+ENV DATABASE_URL="file:/app/prisma/prod.db"
 RUN npx prisma generate
 RUN npx prisma db push
-RUN npm run db:seed
+RUN DATABASE_URL="file:/app/prisma/prod.db" TURSO_AUTH_TOKEN="" TURSO_DATABASE_URL="" npm run db:seed
 RUN npm run build
 
 FROM base AS runner

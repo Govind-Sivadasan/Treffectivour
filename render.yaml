@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: treffectivour
+    runtime: docker
+    plan: free
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+    # Set DATABASE_URL to libsql://YOUR-DB.YOUR-ORG.turso.io and TURSO_AUTH_TOKEN from Turso.
+    # Run once locally after creating the Turso DB:
+    #   DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... npm run db:setup:turso
+    releaseCommand: npm run db:push:turso

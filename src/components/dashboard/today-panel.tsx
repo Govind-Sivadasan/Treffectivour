@@ -209,7 +209,7 @@ export function LoginForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-full mt-1 rounded-xl border border-[var(--color-border)] bg-black/30 px-4 py-2.5 text-sm"
-            placeholder="user@treffectivour.local"
+            placeholder="govind.sivadasan@trenser.com"
             required
           />
         </div>

@@ -39,12 +39,27 @@ npm run db:seed
 npm run dev
 ```
 
-### Demo accounts
+### Accounts
 
-| Role  | Email                         | Password  |
-|-------|-------------------------------|-----------|
-| User  | user@treffectivour.local      | user123   |
-| Admin | admin@treffectivour.local     | admin123  |
+| Role  | Email                         | Password   |
+|-------|-------------------------------|------------|
+| Admin | admin@treffectivour.local     | admin123   |
+
+Team users (password = `<username>123`, except niyas → `niyas123`):
+
+| Name       | Email                              | Password      |
+|------------|------------------------------------|---------------|
+| Adarsh     | adarsh.vasudevan@trenser.com       | adarsh123     |
+| Akash      | akash.udayan@trenser.com           | akash123      |
+| Aparna     | aparna.shaji@trenser.com           | aparna123     |
+| Ashik      | ashik.narayanankutty@trenser.com   | ashik123      |
+| Basil      | basil.baby@trenser.com             | basil123      |
+| Govind     | govind.sivadasan@trenser.com       | govind123     |
+| Jobin      | jobin.edison@trenser.com           | jobin123      |
+| Krishnendu | krishnendu.gopi@trenser.com        | krishnendu123 |
+| Manoj      | manoj.p@trenser.com                | manoj123      |
+| Niyas      | niyasudheen.moithu@trenser.com     | niyas123      |
+| Sarath     | sarath.krishna@trenser.com         | sarath123     |
 
 ## Docker
 
@@ -52,11 +67,37 @@ npm run dev
 docker compose up --build
 ```
 
-Seed the database once after first run:
+Uses a **local volume** at `/data` — data persists across container restarts.
+
+## Deploy on Render (free tier)
+
+Render’s free web tier has **no persistent disk**. SQLite stored inside the container is wiped on sleep, restart, or redeploy. Use **Turso** (free cloud SQLite) instead.
+
+### One-time Turso setup
 
 ```bash
-docker compose exec treffectivour npx tsx prisma/seed.ts
+# Install: https://docs.turso.tech/cli
+turso auth login
+turso db create treffectivour
+turso db show treffectivour --url          # copy libsql:// URL
+turso db tokens create treffectivour       # copy token
+
+# Push schema + seed to Turso
+DATABASE_URL="libsql://YOUR-DB.turso.io" TURSO_AUTH_TOKEN="YOUR-TOKEN" npm run db:setup:turso
 ```
+
+### Render environment variables
+
+| Variable | Value |
+|----------|--------|
+| `DATABASE_URL` | `libsql://YOUR-DB.turso.io` |
+| `TURSO_AUTH_TOKEN` | token from Turso |
+| `JWT_SECRET` | long random string |
+| `COOKIE_SECURE` | `true` |
+
+Deploy with Docker (or connect repo using included `render.yaml`). Do **not** attach a paid disk — Turso holds the data.
+
+Local Docker without Turso still uses `/data` volume as before.
 
 ## How hours are calculated
 
@@ -68,7 +109,8 @@ docker compose exec treffectivour npx tsx prisma/seed.ts
 
 | Variable                 | Default   | Description              |
 |--------------------------|-----------|--------------------------|
-| `DATABASE_URL`           | SQLite    | Database connection      |
+| `DATABASE_URL`           | SQLite    | Local `file:./dev.db` or Turso `libsql://...` |
+| `TURSO_AUTH_TOKEN`       | —         | Required with Turso URLs |
 | `JWT_SECRET`             | —         | Session signing secret   |
 | `DEFAULT_REQUIRED_HOURS` | 8         | Full day target          |
 | `HALF_DAY_REQUIRED_HOURS`| 4         | Half-day leave target    |
