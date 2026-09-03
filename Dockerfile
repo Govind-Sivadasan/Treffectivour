@@ -15,6 +15,7 @@ RUN npx prisma generate
 RUN npx prisma db push
 RUN DATABASE_URL="file:/app/prisma/prod.db" TURSO_AUTH_TOKEN="" TURSO_DATABASE_URL="" npm run db:seed
 RUN npm run build
+RUN npx tsx scripts/collect-turso-deps.ts
 
 FROM base AS runner
 ENV NODE_ENV=production
@@ -26,9 +27,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma/schema.prisma ./prisma/schema.prisma
+COPY --from=builder /app/prisma/turso-init.sql ./prisma/turso-init.sql
 COPY --from=builder /app/prisma/prod.db ./prisma/init.db
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=builder /app/.turso-deps/node_modules/ ./node_modules/
+COPY --from=builder /app/scripts/turso-schema.mjs ./scripts/turso-schema.mjs
 COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN sed -i 's/\r$//' docker-entrypoint.sh && chmod +x docker-entrypoint.sh
 USER nextjs

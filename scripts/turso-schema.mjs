@@ -1,11 +1,14 @@
 import { createClient } from "@libsql/client";
 import { config as loadEnv } from "dotenv";
-import { execSync } from "child_process";
-import path from "path";
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
 loadEnv();
 
-export function getTursoConfig(): { url: string; authToken: string } | null {
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+
+export function getTursoConfig() {
   const url =
     process.env.TURSO_DATABASE_URL ??
     (process.env.DATABASE_URL?.startsWith("libsql:") ? process.env.DATABASE_URL : null);
@@ -18,26 +21,13 @@ export function getTursoConfig(): { url: string; authToken: string } | null {
   return null;
 }
 
-function prismaBin(): string {
-  const ext = process.platform === "win32" ? ".cmd" : "";
-  return path.join("node_modules", ".bin", `prisma${ext}`);
+function loadInitSql() {
+  const sqlPath = join(scriptDir, "..", "prisma", "turso-init.sql");
+  return readFileSync(sqlPath, "utf8");
 }
 
-function generateCreateSql(): string {
-  return execSync(
-    `"${prismaBin()}" migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script`,
-    {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        DATABASE_URL: "file:./prisma/dev.db",
-      },
-    }
-  );
-}
-
-function parseSqlScript(sql: string): string[] {
-  const statements: string[] = [];
+function parseSqlScript(sql) {
+  const statements = [];
   let current = "";
 
   for (const line of sql.split(/\r?\n/)) {
@@ -56,7 +46,7 @@ function parseSqlScript(sql: string): string[] {
   return statements;
 }
 
-export async function ensureTursoSchema(): Promise<boolean> {
+export async function ensureTursoSchema() {
   const turso = getTursoConfig();
   if (!turso) {
     return false;
@@ -72,7 +62,7 @@ export async function ensureTursoSchema(): Promise<boolean> {
   }
 
   console.log("Turso has no schema yet — creating tables…");
-  const statements = parseSqlScript(generateCreateSql());
+  const statements = parseSqlScript(loadInitSql());
 
   for (const statement of statements) {
     await client.execute(statement);
@@ -80,4 +70,25 @@ export async function ensureTursoSchema(): Promise<boolean> {
 
   console.log(`Turso schema ready (${statements.length} statements).`);
   return true;
+}
+
+async function main() {
+  if (!getTursoConfig()) {
+    console.log("Turso not configured (libsql DATABASE_URL + TURSO_AUTH_TOKEN). Skipping.");
+    return;
+  }
+
+  await ensureTursoSchema();
+  console.log("Turso schema is up to date.");
+}
+
+const isMain =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

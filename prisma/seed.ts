@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { ensureTursoSchema } from "../scripts/turso-schema";
+import { ensureTursoSchema } from "../scripts/turso-schema.mjs";
 
 function createSeedClient(): PrismaClient {
   const url =

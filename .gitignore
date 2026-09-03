@@ -45,3 +45,6 @@ next-env.d.ts
 
 # docker data
 /data
+
+# generated docker turso bundle
+.turso-deps

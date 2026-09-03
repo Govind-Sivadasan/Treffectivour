@@ -5,18 +5,21 @@ const TIME_WITH_COLONS =
   /\b(\d{1,2}\s*[:;.]\s*\d{2}(?:\s*[:;.]\s*\d{2})?\s*(?:A\.?M\.?|P\.?M\.?)?)\b/gi;
 
 const COMPACT_TIME =
-  /\b(\d{5,6})\s*(A\.?M\.?|P\.?M\.?)\b/gi;
+  /\b(\d{5,6})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
+
+const MERGED_MMSS =
+  /\b(\d{1,2})\s*[:;.]\s*(\d{4})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
 const SPACE_SEC_TIME =
-  /\b(\d{1,2}:\d{2})\s+(\d{2})\s*(A\.?M\.?|P\.?M\.?)\b/gi;
+  /\b(\d{1,2}:\d{2})\s+(\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
 const HHMM_DOT_SS =
-  /\b(\d{4})[.:](\d{2})\s*(A\.?M\.?|P\.?M\.?)\b/gi;
+  /\b(\d{4})[.:](\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
 function normalizeMeridiem(raw?: string): "AM" | "PM" | undefined {
   if (!raw) return undefined;
   const m = raw.replace(/\./g, "").toUpperCase();
-  if (m.startsWith("P")) return "PM";
+  if (m.startsWith("P") || m.startsWith("F")) return "PM";
   if (m.startsWith("A")) return "AM";
   return undefined;
 }
@@ -25,18 +28,52 @@ function normalizeTimeToken(raw: string): string {
   return raw
     .replace(/\s+/g, " ")
     .replace(/[;.]/g, ":")
+    .replace(/\bFM\b/gi, "PM")
     .replace(/(\d)(AM|PM)/i, "$1 $2")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function isValidTimeString(time: string): boolean {
+  const match = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!match) return false;
+
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const seconds = match[3] ? parseInt(match[3], 10) : 0;
+
+  if (hours < 1 || hours > 12) return false;
+  if (minutes > 59 || seconds > 59) return false;
+  return true;
+}
+
 function compactToTime(digits: string, meridiem: string): string {
   const m = normalizeMeridiem(meridiem) ?? "AM";
   if (digits.length === 5) {
-    return `${digits[0]}:${digits.slice(1, 3)}:${digits.slice(3, 5)} ${m}`;
+    const hour = digits[0];
+    const mm = digits.slice(1, 3);
+    const ss = digits.slice(3, 5);
+    let candidate = `${hour}:${mm}:${ss} ${m}`;
+
+    // OCR often drops the tens digit of minutes (70948 -> 70048 => 7:00:48).
+    if (mm === "00" && Number(ss) >= 30) {
+      for (let tens = 9; tens >= 1; tens--) {
+        const alt = `${hour}:${String(tens).padStart(2, "0")}:${ss} ${m}`;
+        if (isValidTimeString(normalizeTimeToken(alt))) {
+          candidate = alt;
+          break;
+        }
+      }
+    }
+
+    return candidate;
   }
   if (digits.length === 6) {
-    return `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)} ${m}`;
+    const asHourFirst = `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)} ${m}`;
+    if (isValidTimeString(normalizeTimeToken(asHourFirst))) {
+      return asHourFirst;
+    }
+    return `${digits[0]}:${digits.slice(1, 3)}:${digits.slice(3, 5)} ${m}`;
   }
   return `${digits} ${m}`;
 }
@@ -47,6 +84,7 @@ function extractTimes(text: string): string[] {
 
   const add = (t: string) => {
     const n = normalizeTimeToken(t);
+    if (!isValidTimeString(n)) return;
     if (!seen.has(n)) {
       seen.add(n);
       found.push(n);
@@ -55,20 +93,22 @@ function extractTimes(text: string): string[] {
 
   let match: RegExpExecArray | null;
 
-  const colonRegex = new RegExp(TIME_WITH_COLONS.source, "gi");
-  while ((match = colonRegex.exec(text)) !== null) {
-    add(match[1]);
-  }
-
-  const compactRegex = new RegExp(COMPACT_TIME.source, "gi");
-  while ((match = compactRegex.exec(text)) !== null) {
-    add(compactToTime(match[1], match[2]));
+  const mergedRegex = new RegExp(MERGED_MMSS.source, "gi");
+  while ((match = mergedRegex.exec(text)) !== null) {
+    const mmss = match[2];
+    const m = normalizeMeridiem(match[3]) ?? "AM";
+    add(`${match[1]}:${mmss.slice(0, 2)}:${mmss.slice(2, 4)} ${m}`);
   }
 
   const spaceSecRegex = new RegExp(SPACE_SEC_TIME.source, "gi");
   while ((match = spaceSecRegex.exec(text)) !== null) {
     const m = normalizeMeridiem(match[3]) ?? "AM";
     add(`${match[1]}:${match[2]} ${m}`);
+  }
+
+  const compactRegex = new RegExp(COMPACT_TIME.source, "gi");
+  while ((match = compactRegex.exec(text)) !== null) {
+    add(compactToTime(match[1], match[2]));
   }
 
   const hhmmDotRegex = new RegExp(HHMM_DOT_SS.source, "gi");
@@ -78,7 +118,12 @@ function extractTimes(text: string): string[] {
     add(`${digits.slice(0, 2)}:${digits.slice(2, 4)}:${match[2]} ${m}`);
   }
 
-  const looseRegex = /\b(\d{1,2})\s*[:;.]\s*(\d{2})(?:\s*[:;.]\s*(\d{2}))?\s*(A\.?M\.?|P\.?M\.?)?\b/gi;
+  const colonRegex = new RegExp(TIME_WITH_COLONS.source, "gi");
+  while ((match = colonRegex.exec(text)) !== null) {
+    add(match[1]);
+  }
+
+  const looseRegex = /\b(\d{1,2})\s*[:;.]\s*(\d{2})(?:\s*[:;.]\s*(\d{2}))?\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)?\b/gi;
   while ((match = looseRegex.exec(text)) !== null) {
     const sec = match[3] ? `:${match[3]}` : ":00";
     const mer = match[4] ? ` ${normalizeMeridiem(match[4])}` : "";
@@ -263,6 +308,34 @@ function parsePunchesFromLines(
   return dedupePunches(punches);
 }
 
+/** Attendance popup OCR often yields one time per line (IN, OUT, IN, OUT…). */
+function parseGridFromLines(
+  text: string,
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => !isHeaderLine(l) && !/^missing$/i.test(l));
+
+  const times: string[] = [];
+  for (const line of lines) {
+    const found = extractTimesFromLine(line);
+    if (found.length > 0) {
+      times.push(...found);
+    }
+  }
+
+  const punches: OcrResult["punches"] = [];
+  for (let i = 0; i < times.length; i++) {
+    pushPunch(punches, i % 2 === 0 ? "IN" : "OUT", times[i], dateForParsing, refDate);
+  }
+
+  return dedupePunches(punches);
+}
+
 function dedupePunches(
   punches: OcrResult["punches"]
 ): OcrResult["punches"] {
@@ -318,7 +391,10 @@ export function parseOcrText(text: string, referenceDate?: Date): OcrResult {
     `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, "0")}-${String(refDate.getDate()).padStart(2, "0")}`;
 
   const times = refineTimes(extractTimes(normalized));
-  const punches = parsePunchesFromLines(normalized, dateForParsing, refDate);
+  const linePunches = parsePunchesFromLines(normalized, dateForParsing, refDate);
+  const gridPunches = parseGridFromLines(normalized, dateForParsing, refDate);
+  const punches =
+    gridPunches.length >= linePunches.length ? gridPunches : linePunches;
 
   // Fallback when line layout yields nothing but times exist globally
   if (punches.length === 0 && times.length > 0) {

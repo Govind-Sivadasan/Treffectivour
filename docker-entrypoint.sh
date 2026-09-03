@@ -7,6 +7,7 @@ uses_turso() {
 
 if uses_turso; then
   echo "Using Turso cloud database (persistent on Render free tier)."
+  node scripts/turso-schema.mjs
   exec node server.js
 fi
 

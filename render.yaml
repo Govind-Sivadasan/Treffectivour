@@ -18,4 +18,4 @@ services:
     # Set DATABASE_URL to libsql://YOUR-DB.YOUR-ORG.turso.io and TURSO_AUTH_TOKEN from Turso.
     # Run once locally after creating the Turso DB:
     #   DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... npm run db:setup:turso
-    releaseCommand: npm run db:push:turso
+    releaseCommand: node scripts/turso-schema.mjs

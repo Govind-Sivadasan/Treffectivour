@@ -10,7 +10,8 @@
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:push:turso": "tsx scripts/push-turso.ts",
+    "db:generate:turso-sql": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > prisma/turso-init.sql",
+    "db:push:turso": "node scripts/turso-schema.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:setup:turso": "npm run db:push:turso && npm run db:seed",
     "postinstall": "prisma generate"
@@ -35,6 +36,9 @@
     "tailwind-merge": "^3.1.0",
     "tesseract.js": "^6.0.0",
     "zod": "^3.24.2"
+  },
+  "optionalDependencies": {
+    "@libsql/linux-x64-musl": "^0.5.29"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

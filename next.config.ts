@@ -7,7 +7,9 @@ const nextConfig: NextConfig = {
     "jimp",
     "@libsql/client",
     "@prisma/adapter-libsql",
+    "@prisma/driver-adapter-utils",
     "libsql",
+    "@libsql/linux-x64-musl",
   ],
   experimental: {
     serverActions: {
