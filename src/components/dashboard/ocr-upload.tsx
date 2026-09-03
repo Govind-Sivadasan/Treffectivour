@@ -61,28 +61,36 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
       setLoading(true);
 
       try {
-        const { runOcrInBrowser, pickBestOcrResult } = await import("@/lib/ocr");
+        const { runOcrInBrowser, pickBestOcrResult, scoreOcrPunches } =
+          await import("@/lib/ocr");
         toast.message("Reading screenshot…", { duration: 2000 });
 
-        const browserPromise = runOcrInBrowser(file);
-        const serverPromise = (async () => {
-          const form = new FormData();
-          form.append("image", file);
-          form.append("date", overrideDate);
-          const res = await fetch("/api/ocr", { method: "POST", body: form });
-          if (!res.ok) return null;
-          const data = await res.json();
-          return data.ocr as Awaited<ReturnType<typeof runOcrInBrowser>> | null;
-        })();
+        let ocr = await runOcrInBrowser(file);
 
-        const [browserOcr, serverOcr] = await Promise.all([
-          browserPromise,
-          serverPromise,
-        ]);
-
-        const ocr = serverOcr
-          ? pickBestOcrResult(browserOcr, serverOcr)
-          : browserOcr;
+        if (scoreOcrPunches(ocr.punches) < 40) {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 45000);
+          try {
+            const form = new FormData();
+            form.append("image", file);
+            form.append("date", overrideDate);
+            const res = await fetch("/api/ocr", {
+              method: "POST",
+              body: form,
+              signal: controller.signal,
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.ocr) {
+                ocr = pickBestOcrResult(ocr, data.ocr);
+              }
+            }
+          } catch {
+            // keep browser result
+          } finally {
+            clearTimeout(timeout);
+          }
+        }
 
         const dayKey = overrideDate || ocr.dateKey;
         if (!dayKey) {

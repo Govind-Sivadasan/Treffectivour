@@ -633,9 +633,17 @@ export function parseOcrText(
 const OCR_WHITELIST =
   "0123456789:.,APMapmFMMISSINGGayatriTechnopark()AugJanFebMarAprMayJunJulSepOctNovDec/- ";
 const OCR_PSMS = ["11", "6", "4", "13"] as const;
+const OCR_PSMS_FAST = ["11", "6"] as const;
+
+interface OcrScanOptions {
+  maxVariants?: number;
+  psms?: readonly string[];
+  earlyExitPunches?: number;
+}
 
 async function preprocessImageVariants(
-  imageData: Buffer
+  imageData: Buffer,
+  maxVariants = 3
 ): Promise<Array<{ buffer: Buffer; width: number }>> {
   const { Jimp } = await import("jimp");
   const image = await Jimp.read(imageData);
@@ -646,12 +654,16 @@ async function preprocessImageVariants(
   const v1 = image.clone().scale(baseScale).greyscale().contrast(0.35).normalize();
   variants.push({ buffer: await v1.getBuffer("image/png"), width: v1.width });
 
-  const v2 = image.clone().scale(baseScale).greyscale().contrast(0.55).brightness(0.04);
-  variants.push({ buffer: await v2.getBuffer("image/png"), width: v2.width });
+  if (maxVariants >= 2) {
+    const v2 = image.clone().scale(baseScale).greyscale().contrast(0.55).brightness(0.04);
+    variants.push({ buffer: await v2.getBuffer("image/png"), width: v2.width });
+  }
 
-  const heavyScale = Math.max(baseScale, 3);
-  const v3 = image.clone().scale(heavyScale).greyscale().contrast(0.4).normalize();
-  variants.push({ buffer: await v3.getBuffer("image/png"), width: v3.width });
+  if (maxVariants >= 3) {
+    const heavyScale = Math.max(baseScale, 3);
+    const v3 = image.clone().scale(heavyScale).greyscale().contrast(0.4).normalize();
+    variants.push({ buffer: await v3.getBuffer("image/png"), width: v3.width });
+  }
 
   return variants;
 }
@@ -663,7 +675,8 @@ type OcrWorker = Awaited<
 async function recognizeWithWorker(
   worker: OcrWorker,
   imageData: Buffer | Blob,
-  psm: string
+  psm: string,
+  useBlocks = true
 ): Promise<{ text: string; blocks: unknown; confidence: number }> {
   const { PSM } = await import("tesseract.js");
   await worker.setParameters({
@@ -671,39 +684,66 @@ async function recognizeWithWorker(
     tessedit_char_whitelist: OCR_WHITELIST,
     user_defined_dpi: "300",
   });
-  const { data } = await worker.recognize(imageData, {}, { blocks: true });
+  const { data } = await worker.recognize(
+    imageData,
+    {},
+    useBlocks ? { blocks: true } : {}
+  );
   return {
     text: data.text,
-    blocks: data.blocks,
+    blocks: useBlocks ? data.blocks : undefined,
     confidence: data.confidence ?? 0,
   };
 }
 
+function parseRecognizedOcr(
+  text: string,
+  blocks: unknown,
+  imageWidth: number
+): OcrResult {
+  return parseOcrText(text, undefined, blocks ? { blocks, imageWidth } : undefined);
+}
+
 async function runOcrCandidates(
   images: Array<{ buffer: Buffer | Blob; width: number }>,
-  worker: OcrWorker
+  worker: OcrWorker,
+  options: OcrScanOptions = {}
 ): Promise<OcrResult | null> {
+  const psms = options.psms ?? OCR_PSMS;
+  const earlyExitPunches = options.earlyExitPunches ?? 6;
+  const fast = psms.length <= OCR_PSMS_FAST.length;
   let best: OcrResult | null = null;
   let bestScore = -1;
 
   for (const image of images) {
-    for (const psm of OCR_PSMS) {
+    for (const psm of psms) {
       try {
+        if (fast) {
+          const quick = await recognizeWithWorker(worker, image.buffer, psm, false);
+          const quickParsed = parseRecognizedOcr(quick.text, quick.blocks, image.width);
+          const quickScore = scoreOcrPunches(quickParsed.punches) + quick.confidence / 25;
+          if (quickScore > bestScore) {
+            bestScore = quickScore;
+            best = { ...quickParsed, rawText: quick.text };
+          }
+          if (quickParsed.punches.length >= earlyExitPunches) {
+            return best;
+          }
+        }
+
         const { text, blocks, confidence } = await recognizeWithWorker(
           worker,
           image.buffer,
-          psm
+          psm,
+          true
         );
-        const parsed = parseOcrText(text, undefined, {
-          blocks,
-          imageWidth: image.width,
-        });
+        const parsed = parseRecognizedOcr(text, blocks, image.width);
         const score = scoreOcrPunches(parsed.punches) + confidence / 25;
         if (score > bestScore) {
           bestScore = score;
           best = { ...parsed, rawText: text };
         }
-        if (parsed.punches.length >= 6 && score >= 70) {
+        if (parsed.punches.length >= earlyExitPunches) {
           return best;
         }
       } catch {
@@ -728,19 +768,23 @@ export async function runOcr(imageData: Buffer | string): Promise<OcrResult> {
   try {
     let variants: Array<{ buffer: Buffer; width: number }>;
     try {
-      variants = await preprocessImageVariants(input);
+      variants = await preprocessImageVariants(input, 2);
     } catch {
       variants = [{ buffer: input, width: 800 }];
     }
 
-    const processedBest = await runOcrCandidates(variants, worker);
+    const processedBest = await runOcrCandidates(variants, worker, {
+      psms: OCR_PSMS_FAST,
+      earlyExitPunches: 4,
+    });
     if (processedBest && processedBest.punches.length > 0) {
       return processedBest;
     }
 
     const originalBest = await runOcrCandidates(
       [{ buffer: input, width: variants[0]?.width ?? 800 }],
-      worker
+      worker,
+      { psms: OCR_PSMS_FAST, earlyExitPunches: 4 }
     );
     return originalBest ?? processedBest ?? parseOcrText("");
   } finally {
@@ -749,7 +793,8 @@ export async function runOcr(imageData: Buffer | string): Promise<OcrResult> {
 }
 
 async function preprocessImageInBrowser(
-  file: File | Blob
+  file: File | Blob,
+  maxVariants = 1
 ): Promise<Array<{ blob: Blob; width: number }>> {
   const bitmap = await createImageBitmap(file);
   const baseScale = bitmap.width < 400 ? 4 : bitmap.width < 800 ? 3 : 2;
@@ -789,11 +834,23 @@ async function preprocessImageInBrowser(
     return { blob, width: canvas.width };
   };
 
-  const variants = await Promise.all([
-    render(baseScale, 1.35),
-    render(baseScale, 1.65),
-    render(Math.max(baseScale, 3), 1.45),
-  ]);
+  const variantConfigs: Array<[number, number]> =
+    maxVariants >= 3
+      ? [
+          [baseScale, 1.35],
+          [baseScale, 1.65],
+          [Math.max(baseScale, 3), 1.45],
+        ]
+      : maxVariants >= 2
+        ? [
+            [baseScale, 1.35],
+            [baseScale, 1.65],
+          ]
+        : [[baseScale, 1.35]];
+
+  const variants = await Promise.all(
+    variantConfigs.map(([scale, contrast]) => render(scale, contrast))
+  );
   bitmap.close();
   return variants;
 }
@@ -804,14 +861,15 @@ export async function runOcrInBrowser(file: File | Blob): Promise<OcrResult> {
   try {
     let variants: Array<{ blob: Blob; width: number }>;
     try {
-      variants = await preprocessImageInBrowser(file);
+      variants = await preprocessImageInBrowser(file, 1);
     } catch {
       variants = [{ blob: file, width: 800 }];
     }
 
     const best = await runOcrCandidates(
       variants.map((v) => ({ buffer: v.blob, width: v.width })),
-      worker
+      worker,
+      { psms: OCR_PSMS_FAST, earlyExitPunches: 4 }
     );
     return best ?? parseOcrText("");
   } finally {
