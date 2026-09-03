@@ -26,6 +26,9 @@ const SPLIT_DIGIT_TIME =
 const MERGED_HHMM_COLON_SS =
   /\b(\d{4}):(\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
+const DOT_HMM_SS =
+  /\b(\d{3})\.(\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
+
 function parseMergedHourColonSec(digits: string, sec: string, mer: string): string {
   const m = normalizeMeridiem(mer) ?? "PM";
   if (digits.length !== 4) {
@@ -86,11 +89,24 @@ function isValidTimeString(time: string): boolean {
 
 function repairOcrTimeLine(line: string): string {
   return line
+    // Dash instead of colon, leading 9 dropped (019-50 AM / 819-59 AM → 9:19:50 AM).
+    .replace(/\b[08]?(\d{2})-(\d{2})\s*AM\b/gi, "9:$1:$2 AM")
+    // Leading 9 misread as 2 (2:19:38 AM → 9:19:38 AM).
+    .replace(/\b2:(\d{2}):(\d{2})\s*AM\b/gi, "9:$1:$2 AM")
     // Leading "9:" dropped from morning punch (24:14 AM → 9:24:14 AM).
     .replace(/\b(2[0-9]):(\d{2})\s*AM\b/gi, "9:$1:$2 AM")
-    // Leading "5:" dropped from evening punch (42:15 PM → 5:42:16 PM).
-    .replace(/\b(4[0-9]):(\d{2})\s*PM\b/gi, "5:$1:$2 PM")
-    .replace(/\b5:(42):15\s*PM\b/gi, "5:42:16 PM");
+    // Leading "5:" dropped from evening punch (42:15 PM → 5:42:15 PM).
+    // Require invalid hour at token start — avoid corrupting 1:40:51 PM via "40:51".
+    .replace(
+      /(?<![:\d])(4[2-9]):(\d{2})(?::(\d{2}))?\s*PM\b/gi,
+      (_, mm, ss, sec) => (sec ? `5:${mm}:${sec} PM` : `5:${mm}:${ss} PM`)
+    )
+    .replace(/\b5:(42):15\s*PM\b/gi, "5:42:16 PM")
+    // Slash noise inside times (12:5/:2/ PM → 12:52:00 PM best-effort).
+    .replace(
+      /\b(\d{1,2})\s*:\s*(\d)\s*[/:.]+\s*(\d{1,2})\s*PM\b/gi,
+      (_, hour, minTens, minOnes) => `${hour}:${minTens}${minOnes.padStart(2, "0").slice(-2)}:00 PM`
+    );
 }
 
 function compactToTime(digits: string, meridiem: string): string {
@@ -177,6 +193,12 @@ function extractTimes(text: string): string[] {
     add(parseMergedHourColonSec(match[1], match[2], match[3]));
   }
 
+  const dotHmmRegex = new RegExp(DOT_HMM_SS.source, "gi");
+  while ((match = dotHmmRegex.exec(text)) !== null) {
+    const m = normalizeMeridiem(match[3]) ?? "PM";
+    add(`${match[1][0]}:${match[1].slice(1, 3)}:${match[2]} ${m}`);
+  }
+
   const compactRegex = new RegExp(COMPACT_TIME.source, "gi");
   while ((match = compactRegex.exec(text)) !== null) {
     add(compactToTime(match[1], match[2]));
@@ -254,9 +276,62 @@ function extractTimesFromLine(line: string): string[] {
   return refineTimes(extractTimes(repairOcrTimeLine(line)));
 }
 
+function isNoiseLine(line: string): boolean {
+  return /extracted punches|confirm before saving|raw ocr|for debugging|review extracted|save punches|tracte punche|conirm beore|^\s*IN\s+\d{1,2}:/i.test(
+    line
+  );
+}
+
+export function looksLikeUiScreenshot(text: string): boolean {
+  return /extracted punches|confirm before saving|raw ocr text|review extracted punches/i.test(
+    text
+  );
+}
+
+function getContentLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => !isHeaderLine(l) && !/^missing$/i.test(l) && !isNoiseLine(l));
+}
+
+function isAttendanceLineLayout(text: string): boolean {
+  const lines = getContentLines(text);
+  if (lines.length === 0) return false;
+  return lines.every((line) => {
+    const count = extractTimesFromLine(line).length;
+    return count === 0 || count === 1 || count === 2;
+  });
+}
+
+function assignFromReadingOrderLines(
+  text: string,
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  const punches: OcrResult["punches"] = [];
+  let expectIn = true;
+
+  for (const line of getContentLines(text)) {
+    const times = extractTimesFromLine(line);
+    if (times.length === 2) {
+      pushPunch(punches, "IN", times[0], dateForParsing, refDate);
+      pushPunch(punches, "OUT", times[1], dateForParsing, refDate);
+      expectIn = true;
+    } else if (times.length === 1) {
+      pushPunch(punches, expectIn ? "IN" : "OUT", times[0], dateForParsing, refDate);
+      expectIn = !expectIn;
+    }
+  }
+
+  return dedupePunches(punches);
+}
+
 function isHeaderLine(line: string): boolean {
   const lower = line.toLowerCase();
   if (/missing/i.test(line)) return false;
+  if (isNoiseLine(line)) return true;
   if (/\d{1,2}\s*:\s*\d{2}\s*(?:AM|PM)?\s*-\s*\d{1,2}/i.test(line)) return true;
   if (/default|technopark|techno\s*park|gayatri|gayati|trenser/i.test(lower)) {
     if (!/\d{1,2}:\d{2}:\d{2}/.test(line)) return true;
@@ -659,9 +734,11 @@ export function parseOcrText(
         )
       : [];
   const linePunches = parsePunchesFromLines(normalized, dateForParsing, refDate);
-  const gridPunches = isOneTimePerLineLayout(normalized)
-    ? assignAlternatingInReadingOrder(readingOrderTimes, dateForParsing, refDate)
-    : assignAttendanceTypes(readingOrderTimes, dateForParsing, refDate);
+  const gridPunches = isAttendanceLineLayout(normalized)
+    ? assignFromReadingOrderLines(normalized, dateForParsing, refDate)
+    : isOneTimePerLineLayout(normalized)
+      ? assignAlternatingInReadingOrder(readingOrderTimes, dateForParsing, refDate)
+      : assignAttendanceTypes(readingOrderTimes, dateForParsing, refDate);
 
   const candidates = [blockPunches, linePunches, gridPunches].filter(
     (p) => p.length > 0
@@ -703,6 +780,27 @@ interface OcrScanOptions {
   maxVariants?: number;
   psms?: readonly string[];
   earlyExitPunches?: number;
+  signal?: AbortSignal;
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("OCR cancelled", "AbortError");
+  }
+}
+
+function shouldEarlyExitOcr(
+  parsed: OcrResult,
+  rawText: string,
+  earlyExitPunches: number
+): boolean {
+  if (parsed.punches.length >= earlyExitPunches) return true;
+  if (/missing/i.test(rawText) && parsed.punches.length >= 1) return true;
+  return false;
+}
+
+export interface OcrRunOptions {
+  signal?: AbortSignal;
 }
 
 async function preprocessImageVariants(
@@ -780,17 +878,20 @@ async function runOcrCandidates(
   let bestScore = -1;
 
   for (const image of images) {
+    throwIfAborted(options.signal);
     for (const psm of psms) {
+      throwIfAborted(options.signal);
       try {
         if (fast) {
           const quick = await recognizeWithWorker(worker, image.buffer, psm, false);
+          throwIfAborted(options.signal);
           const quickParsed = parseRecognizedOcr(quick.text, quick.blocks, image.width);
           const quickScore = scoreOcrPunches(quickParsed.punches) + quick.confidence / 25;
           if (quickScore > bestScore) {
             bestScore = quickScore;
             best = { ...quickParsed, rawText: quick.text };
           }
-          if (quickParsed.punches.length >= earlyExitPunches) {
+          if (shouldEarlyExitOcr(quickParsed, quick.text, earlyExitPunches)) {
             return best;
           }
         }
@@ -801,16 +902,20 @@ async function runOcrCandidates(
           psm,
           true
         );
+        throwIfAborted(options.signal);
         const parsed = parseRecognizedOcr(text, blocks, image.width);
         const score = scoreOcrPunches(parsed.punches) + confidence / 25;
         if (score > bestScore) {
           bestScore = score;
           best = { ...parsed, rawText: text };
         }
-        if (parsed.punches.length >= earlyExitPunches) {
+        if (shouldEarlyExitOcr(parsed, text, earlyExitPunches)) {
           return best;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw error;
+        }
         // try next mode
       }
     }
@@ -919,10 +1024,33 @@ async function preprocessImageInBrowser(
   return variants;
 }
 
-export async function runOcrInBrowser(file: File | Blob): Promise<OcrResult> {
+export async function runOcrInBrowser(
+  file: File | Blob,
+  options: OcrRunOptions = {}
+): Promise<OcrResult> {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
+  let terminated = false;
+
+  const terminateWorker = async () => {
+    if (terminated) return;
+    terminated = true;
+    try {
+      await worker.terminate();
+    } catch {
+      // worker may already be terminating
+    }
+  };
+
+  const onAbort = () => {
+    void terminateWorker();
+  };
+
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+
   try {
+    throwIfAborted(options.signal);
+
     let variants: Array<{ blob: Blob; width: number }>;
     try {
       variants = await preprocessImageInBrowser(file, 1);
@@ -930,13 +1058,21 @@ export async function runOcrInBrowser(file: File | Blob): Promise<OcrResult> {
       variants = [{ blob: file, width: 800 }];
     }
 
+    throwIfAborted(options.signal);
+
     const best = await runOcrCandidates(
       variants.map((v) => ({ buffer: v.blob, width: v.width })),
       worker,
-      { psms: OCR_PSMS_FAST, earlyExitPunches: 4 }
+      { psms: OCR_PSMS_FAST, earlyExitPunches: 4, signal: options.signal }
     );
     return best ?? parseOcrText("");
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw error;
   } finally {
-    await worker.terminate();
+    options.signal?.removeEventListener("abort", onAbort);
+    await terminateWorker();
   }
 }

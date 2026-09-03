@@ -28,6 +28,7 @@ interface PendingOcr {
   dayKey: string;
   rawText: string;
   punches: Array<{ type: "IN" | "OUT"; time: string }>;
+  hasOpenOut?: boolean;
 }
 
 export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
@@ -40,8 +41,18 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
   const [overrideDate, setOverrideDate] = useState(date);
   const dropRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancelProcessing = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    toast.message("OCR cancelled");
+  }, []);
 
   const clearPreview = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     setPending(null);
@@ -60,16 +71,22 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
       setPending(null);
       setLoading(true);
 
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
-        const { runOcrInBrowser, pickBestOcrResult, scoreOcrPunches } =
+        const { runOcrInBrowser, pickBestOcrResult, looksLikeUiScreenshot } =
           await import("@/lib/ocr");
         toast.message("Reading screenshot…", { duration: 2000 });
 
-        let ocr = await runOcrInBrowser(file);
+        let ocr = await runOcrInBrowser(file, { signal: controller.signal });
 
-        if (scoreOcrPunches(ocr.punches) < 40) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 45000);
+        if (controller.signal.aborted) return;
+
+        if (ocr.punches.length === 0) {
+          const fetchController = new AbortController();
+          const timeout = setTimeout(() => fetchController.abort(), 45000);
           try {
             const form = new FormData();
             form.append("image", file);
@@ -77,19 +94,29 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
             const res = await fetch("/api/ocr", {
               method: "POST",
               body: form,
-              signal: controller.signal,
+              signal: fetchController.signal,
             });
+            if (controller.signal.aborted) return;
             if (res.ok) {
               const data = await res.json();
               if (data.ocr) {
                 ocr = pickBestOcrResult(ocr, data.ocr);
               }
             }
-          } catch {
-            // keep browser result
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              // server timeout or user cancel during fetch
+            }
           } finally {
             clearTimeout(timeout);
           }
+        }
+
+        if (controller.signal.aborted) return;
+
+        if (looksLikeUiScreenshot(ocr.rawText)) {
+          toast.error("That looks like the review screen — paste the attendance popup instead");
+          return;
         }
 
         const dayKey = overrideDate || ocr.dateKey;
@@ -109,11 +136,16 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
           dayKey,
           rawText: ocr.rawText,
           punches: ocr.punches.map((p) => ({ type: p.type, time: p.time })),
+          hasOpenOut: /missing/i.test(ocr.rawText),
         });
         toast.message("Review extracted punches below", { duration: 2500 });
-      } catch {
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         toast.error("Failed to process screenshot");
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         setLoading(false);
       }
     },
@@ -296,8 +328,16 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
               Close
             </button>
             {loading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50">
                 <Loader2 className="w-8 h-8 animate-spin text-white" />
+                <button
+                  type="button"
+                  onClick={cancelProcessing}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-black/70 border border-white/10 px-3 py-1.5 text-xs text-white hover:bg-black/90 transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Stop OCR
+                </button>
               </div>
             )}
           </div>
@@ -333,6 +373,11 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
                   </li>
                 ))}
               </ul>
+              {pending.hasOpenOut && (
+                <p className="text-xs text-[var(--color-muted)]">
+                  Missing OUT detected — open session will count to current time after save.
+                </p>
+              )}
               <div className="flex gap-2 pt-1">
                 <Button onClick={confirmSave} disabled={saving} className="flex-1">
                   <Check className="w-4 h-4" />
