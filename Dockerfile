@@ -1,5 +1,4 @@
-FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat
+FROM node:20-bookworm-slim AS base
 WORKDIR /app
 
 FROM base AS deps
@@ -20,9 +19,9 @@ RUN npx tsx scripts/collect-turso-deps.ts
 FROM base AS runner
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:/data/treffectivour.db"
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-RUN mkdir -p /data && chown nextjs:nodejs /data
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs nextjs \
+  && mkdir -p /data && chown nextjs:nodejs /data
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

@@ -1,4 +1,4 @@
-import { createClient } from "@libsql/client";
+import { createClient } from "@libsql/client/http";
 import { config as loadEnv } from "dotenv";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";

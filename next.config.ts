@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     "@prisma/adapter-libsql",
     "@prisma/driver-adapter-utils",
     "libsql",
-    "@libsql/linux-x64-musl",
+    "@libsql/linux-x64-gnu",
   ],
   experimental: {
     serverActions: {

@@ -37,8 +37,11 @@
     "tesseract.js": "^6.0.0",
     "zod": "^3.24.2"
   },
+  "overrides": {
+    "@libsql/client": "$@libsql/client"
+  },
   "optionalDependencies": {
-    "@libsql/linux-x64-musl": "^0.5.29"
+    "@libsql/linux-x64-gnu": "^0.5.29"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

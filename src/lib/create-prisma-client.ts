@@ -16,7 +16,7 @@ function getTursoConfig(): { url: string; authToken: string } | null {
 }
 
 function createTursoAdapter(url: string, authToken: string) {
-  // Lazy load so Docker/Alpine file-SQLite builds never pull libsql native deps.
+  // Lazy load so local file-SQLite builds can skip Turso deps when unset.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PrismaLibSQL } = require("@prisma/adapter-libsql") as typeof import("@prisma/adapter-libsql");
   return new PrismaLibSQL({ url, authToken });
