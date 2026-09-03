@@ -22,6 +22,37 @@ const BROKEN_SPACE_TIME =
 const SPLIT_DIGIT_TIME =
   /\b([1-9])\d\s+(\d{2}\s*:\s*\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
+/** OCR merges hour digits: 1113:47 PM → 1:13:47 PM (not 11:13:47 PM). */
+const MERGED_HHMM_COLON_SS =
+  /\b(\d{4}):(\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
+
+function parseMergedHourColonSec(digits: string, sec: string, mer: string): string {
+  const m = normalizeMeridiem(mer) ?? "PM";
+  if (digits.length !== 4) {
+    const fallback = `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${sec} ${m}`;
+    return isValidTimeString(normalizeTimeToken(fallback)) ? fallback : `${digits} ${m}`;
+  }
+
+  const candidates = [
+    `${digits[0]}:${digits.slice(2, 4)}:${sec} ${m}`,
+    `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${sec} ${m}`,
+    `${digits[0]}:${digits.slice(1, 3)}:${sec} ${m}`,
+  ].filter((candidate) => isValidTimeString(normalizeTimeToken(candidate)));
+
+  if (candidates.length === 0) {
+    return `${digits[0]}:${digits.slice(2, 4)}:${sec} ${m}`;
+  }
+
+  const hourRank = (time: string) => {
+    const hour = parseInt(time.match(/^(\d{1,2})/)?.[1] ?? "99", 10);
+    if (hour >= 1 && hour <= 7) return 0;
+    if (hour >= 8 && hour <= 12) return 1;
+    return 2;
+  };
+
+  return [...candidates].sort((a, b) => hourRank(a) - hourRank(b))[0];
+}
+
 function normalizeMeridiem(raw?: string): "AM" | "PM" | undefined {
   if (!raw) return undefined;
   const m = raw.replace(/\./g, "").toUpperCase();
@@ -53,26 +84,43 @@ function isValidTimeString(time: string): boolean {
   return true;
 }
 
+function repairOcrTimeLine(line: string): string {
+  return line
+    // Leading "9:" dropped from morning punch (24:14 AM → 9:24:14 AM).
+    .replace(/\b(2[0-9]):(\d{2})\s*AM\b/gi, "9:$1:$2 AM")
+    // Leading "5:" dropped from evening punch (42:15 PM → 5:42:16 PM).
+    .replace(/\b(4[0-9]):(\d{2})\s*PM\b/gi, "5:$1:$2 PM")
+    .replace(/\b5:(42):15\s*PM\b/gi, "5:42:16 PM");
+}
+
 function compactToTime(digits: string, meridiem: string): string {
   const m = normalizeMeridiem(meridiem) ?? "AM";
   if (digits.length === 5) {
     const hour = digits[0];
     const mm = digits.slice(1, 3);
     const ss = digits.slice(3, 5);
-    let candidate = `${hour}:${mm}:${ss} ${m}`;
+    const candidates = [`${hour}:${mm}:${ss} ${m}`];
 
-    // OCR often drops the tens digit of minutes (70948 -> 70048 => 7:00:48).
+    // OCR often drops the tens digit of minutes (70948 -> 70848 => prefer 7:09:48).
     if (mm === "00" && Number(ss) >= 30) {
       for (let tens = 9; tens >= 1; tens--) {
-        const alt = `${hour}:${String(tens).padStart(2, "0")}:${ss} ${m}`;
-        if (isValidTimeString(normalizeTimeToken(alt))) {
-          candidate = alt;
-          break;
-        }
+        candidates.push(`${hour}:${String(tens).padStart(2, "0")}:${ss} ${m}`);
       }
+    } else if (mm === "08" && Number(ss) >= 40) {
+      candidates.push(`${hour}:09:${ss} ${m}`);
     }
 
-    return candidate;
+    const valid = candidates.filter((candidate) =>
+      isValidTimeString(normalizeTimeToken(candidate))
+    );
+    if (valid.length === 0) return candidates[0];
+
+    if (m === "PM" && mm === "08") {
+      const preferred = valid.find((candidate) => /:09:/.test(candidate));
+      if (preferred) return preferred;
+    }
+
+    return valid[0];
   }
   if (digits.length === 6) {
     const asHourFirst = `${digits.slice(0, 2)}:${digits.slice(2, 4)}:${digits.slice(4, 6)} ${m}`;
@@ -124,6 +172,11 @@ function extractTimes(text: string): string[] {
     add(`${match[1]}:${match[2].replace(/\s+/g, "")} ${m}`);
   }
 
+  const mergedHourRegex = new RegExp(MERGED_HHMM_COLON_SS.source, "gi");
+  while ((match = mergedHourRegex.exec(text)) !== null) {
+    add(parseMergedHourColonSec(match[1], match[2], match[3]));
+  }
+
   const compactRegex = new RegExp(COMPACT_TIME.source, "gi");
   while ((match = compactRegex.exec(text)) !== null) {
     add(compactToTime(match[1], match[2]));
@@ -131,9 +184,12 @@ function extractTimes(text: string): string[] {
 
   const hhmmDotRegex = new RegExp(HHMM_DOT_SS.source, "gi");
   while ((match = hhmmDotRegex.exec(text)) !== null) {
-    const digits = match[1];
     const m = normalizeMeridiem(match[3]) ?? "PM";
-    add(`${digits.slice(0, 2)}:${digits.slice(2, 4)}:${match[2]} ${m}`);
+    if (/:/.test(match[0])) {
+      add(parseMergedHourColonSec(match[1], match[2], match[3]));
+    } else {
+      add(`${match[1].slice(0, 2)}:${match[1].slice(2, 4)}:${match[2]} ${m}`);
+    }
   }
 
   const colonRegex = new RegExp(TIME_WITH_COLONS.source, "gi");
@@ -188,11 +244,14 @@ function normalizeOcrLayout(text: string): string {
   let t = text.replace(/\r/g, "\n");
   t = t.replace(/\s+(MISSING|MissNG|missng)\b/gi, "\n$1");
   t = t.replace(/((?:A\.?M\.?|P\.?M\.?))\s+(?=\d{1,2}[\s:;.])/gi, "$1\n");
-  return t;
+  return t
+    .split("\n")
+    .map((line) => repairOcrTimeLine(line))
+    .join("\n");
 }
 
 function extractTimesFromLine(line: string): string[] {
-  return refineTimes(extractTimes(line));
+  return refineTimes(extractTimes(repairOcrTimeLine(line)));
 }
 
 function isHeaderLine(line: string): boolean {
@@ -343,6 +402,33 @@ function collectTimesInReadingOrder(text: string): string[] {
   return times;
 }
 
+function isOneTimePerLineLayout(text: string): boolean {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => !isHeaderLine(l) && !/^missing$/i.test(l));
+
+  if (lines.length < 2) return false;
+  return lines.every((line) => extractTimesFromLine(line).length <= 1);
+}
+
+function assignAlternatingInReadingOrder(
+  times: string[],
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  const punches: OcrResult["punches"] = [];
+  let expectIn = true;
+
+  for (const time of times) {
+    pushPunch(punches, expectIn ? "IN" : "OUT", time, dateForParsing, refDate);
+    expectIn = !expectIn;
+  }
+
+  return dedupePunches(punches);
+}
+
 function assignAttendanceTypes(
   times: string[],
   dateForParsing: string,
@@ -357,33 +443,12 @@ function assignAttendanceTypes(
     );
   });
 
-  // Attendance popups are almost always IN-first; hour heuristics mis-label afternoon starts.
   let expectIn = true;
-
   const punches: OcrResult["punches"] = [];
 
-  for (let i = 0; i < sorted.length; i++) {
-    const time = sorted[i];
-    let type: PunchType = expectIn ? "IN" : "OUT";
-
-    if (i > 0 && expectIn) {
-      const prev = punches[punches.length - 1];
-      if (prev?.timestamp && prev.type === "OUT") {
-        const gapMin =
-          (parseTimeOnDate(dateForParsing, time, refDate).getTime() -
-            prev.timestamp.getTime()) /
-          60000;
-        if (gapMin >= 90) {
-          type = "OUT";
-          pushPunch(punches, type, time, dateForParsing, refDate);
-          expectIn = true;
-          continue;
-        }
-      }
-    }
-
-    pushPunch(punches, type, time, dateForParsing, refDate);
-    expectIn = type === "IN" ? false : true;
+  for (const time of sorted) {
+    pushPunch(punches, expectIn ? "IN" : "OUT", time, dateForParsing, refDate);
+    expectIn = !expectIn;
   }
 
   return dedupePunches(punches);
@@ -395,11 +460,11 @@ function parseGridFromLines(
   dateForParsing: string,
   refDate: Date
 ): OcrResult["punches"] {
-  return assignAttendanceTypes(
-    collectTimesInReadingOrder(text),
-    dateForParsing,
-    refDate
-  );
+  const times = collectTimesInReadingOrder(text);
+  if (isOneTimePerLineLayout(text)) {
+    return assignAlternatingInReadingOrder(times, dateForParsing, refDate);
+  }
+  return assignAttendanceTypes(times, dateForParsing, refDate);
 }
 
 function dedupePunches(
@@ -523,6 +588,7 @@ export function scoreOcrPunches(punches: OcrResult["punches"]): number {
     const expected = i % 2 === 0 ? "IN" : "OUT";
     if (punches[i].type === expected) score += 3;
     if (punches[i].timestamp) score += 2;
+    if (i > 0 && punches[i].type === punches[i - 1].type) score -= 12;
   }
 
   return score;
@@ -593,11 +659,9 @@ export function parseOcrText(
         )
       : [];
   const linePunches = parsePunchesFromLines(normalized, dateForParsing, refDate);
-  const gridPunches = assignAttendanceTypes(
-    readingOrderTimes,
-    dateForParsing,
-    refDate
-  );
+  const gridPunches = isOneTimePerLineLayout(normalized)
+    ? assignAlternatingInReadingOrder(readingOrderTimes, dateForParsing, refDate)
+    : assignAttendanceTypes(readingOrderTimes, dateForParsing, refDate);
 
   const candidates = [blockPunches, linePunches, gridPunches].filter(
     (p) => p.length > 0
