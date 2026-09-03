@@ -23,6 +23,7 @@ export interface ApiDaySummary {
     type: "IN" | "OUT";
     timestamp: string;
     isManual: boolean;
+    sortOrder?: number;
   }>;
   pairs: Array<{ in: string; out: string | null; durationMs: number }>;
 }
@@ -31,6 +32,7 @@ function computeSummary(api: ApiDaySummary, now: Date): ApiDaySummary {
   const computed = calculateFromPunches(
     api.punches.map((p) => ({
       ...p,
+      sortOrder: p.sortOrder ?? 0,
       timestamp: new Date(p.timestamp),
     })),
     {
@@ -62,9 +64,12 @@ export function useLiveDaySummary(apiSummary: ApiDaySummary | null, live = true)
 
   const hasOpenSession = useMemo(() => {
     if (!apiSummary?.punches.length) return false;
-    const sorted = [...apiSummary.punches].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    const sorted = [...apiSummary.punches].sort((a, b) => {
+      const orderA = a.sortOrder ?? 0;
+      const orderB = b.sortOrder ?? 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    });
     return sorted.at(-1)?.type === "IN";
   }, [apiSummary]);
 

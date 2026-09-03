@@ -30,6 +30,7 @@ CREATE TABLE "Punch" (
     "dayRecordId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "timestamp" DATETIME NOT NULL,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "isManual" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Punch_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -55,6 +56,7 @@ CREATE INDEX "DayRecord_userId_date_idx" ON "DayRecord"("userId", "date");
 CREATE UNIQUE INDEX "DayRecord_userId_date_key" ON "DayRecord"("userId", "date");
 
 -- CreateIndex
+CREATE INDEX "Punch_dayRecordId_sortOrder_idx" ON "Punch"("dayRecordId", "sortOrder");
 CREATE INDEX "Punch_dayRecordId_timestamp_idx" ON "Punch"("dayRecordId", "timestamp");
 
 -- CreateIndex

@@ -16,6 +16,12 @@ const SPACE_SEC_TIME =
 const HHMM_DOT_SS =
   /\b(\d{4})[.:](\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
 
+const BROKEN_SPACE_TIME =
+  /\b(\d)\s+(\d{2}\s*:\s*\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
+
+const SPLIT_DIGIT_TIME =
+  /\b([1-9])\d\s+(\d{2}\s*:\s*\d{2})\s*(A\.?M\.?|P\.?M\.?|F\.?M\.?)\b/gi;
+
 function normalizeMeridiem(raw?: string): "AM" | "PM" | undefined {
   if (!raw) return undefined;
   const m = raw.replace(/\./g, "").toUpperCase();
@@ -104,6 +110,18 @@ function extractTimes(text: string): string[] {
   while ((match = spaceSecRegex.exec(text)) !== null) {
     const m = normalizeMeridiem(match[3]) ?? "AM";
     add(`${match[1]}:${match[2]} ${m}`);
+  }
+
+  const brokenSpaceRegex = new RegExp(BROKEN_SPACE_TIME.source, "gi");
+  while ((match = brokenSpaceRegex.exec(text)) !== null) {
+    const m = normalizeMeridiem(match[3]) ?? "PM";
+    add(`${match[1]}:${match[2].replace(/\s+/g, "")} ${m}`);
+  }
+
+  const splitDigitRegex = new RegExp(SPLIT_DIGIT_TIME.source, "gi");
+  while ((match = splitDigitRegex.exec(text)) !== null) {
+    const m = normalizeMeridiem(match[3]) ?? "PM";
+    add(`${match[1]}:${match[2].replace(/\s+/g, "")} ${m}`);
   }
 
   const compactRegex = new RegExp(COMPACT_TIME.source, "gi");
@@ -308,12 +326,7 @@ function parsePunchesFromLines(
   return dedupePunches(punches);
 }
 
-/** Attendance popup OCR often yields one time per line (IN, OUT, IN, OUT…). */
-function parseGridFromLines(
-  text: string,
-  dateForParsing: string,
-  refDate: Date
-): OcrResult["punches"] {
+function collectTimesInReadingOrder(text: string): string[] {
   const lines = text
     .split("\n")
     .map((l) => l.trim())
@@ -327,13 +340,66 @@ function parseGridFromLines(
       times.push(...found);
     }
   }
+  return times;
+}
+
+function assignAttendanceTypes(
+  times: string[],
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  if (times.length === 0) return [];
+
+  const sorted = [...times].sort((a, b) => {
+    return (
+      parseTimeOnDate(dateForParsing, a, refDate).getTime() -
+      parseTimeOnDate(dateForParsing, b, refDate).getTime()
+    );
+  });
+
+  // Attendance popups are almost always IN-first; hour heuristics mis-label afternoon starts.
+  let expectIn = true;
 
   const punches: OcrResult["punches"] = [];
-  for (let i = 0; i < times.length; i++) {
-    pushPunch(punches, i % 2 === 0 ? "IN" : "OUT", times[i], dateForParsing, refDate);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const time = sorted[i];
+    let type: PunchType = expectIn ? "IN" : "OUT";
+
+    if (i > 0 && expectIn) {
+      const prev = punches[punches.length - 1];
+      if (prev?.timestamp && prev.type === "OUT") {
+        const gapMin =
+          (parseTimeOnDate(dateForParsing, time, refDate).getTime() -
+            prev.timestamp.getTime()) /
+          60000;
+        if (gapMin >= 90) {
+          type = "OUT";
+          pushPunch(punches, type, time, dateForParsing, refDate);
+          expectIn = true;
+          continue;
+        }
+      }
+    }
+
+    pushPunch(punches, type, time, dateForParsing, refDate);
+    expectIn = type === "IN" ? false : true;
   }
 
   return dedupePunches(punches);
+}
+
+/** Attendance popup OCR often yields one time per line (IN, OUT, IN, OUT…). */
+function parseGridFromLines(
+  text: string,
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  return assignAttendanceTypes(
+    collectTimesInReadingOrder(text),
+    dateForParsing,
+    refDate
+  );
 }
 
 function dedupePunches(
@@ -347,6 +413,128 @@ function dedupePunches(
     seen.add(key);
     return true;
   });
+}
+
+interface OcrWordBox {
+  text: string;
+  x: number;
+  y: number;
+  confidence: number;
+}
+
+function extractWordBoxes(blocks: unknown): OcrWordBox[] {
+  if (!blocks || !Array.isArray(blocks)) return [];
+
+  const words: OcrWordBox[] = [];
+  for (const block of blocks as Array<{
+    paragraphs?: Array<{
+      lines?: Array<{
+        words?: Array<{
+          text: string;
+          bbox: { x0: number; y0: number; x1: number; y1: number };
+          confidence: number;
+        }>;
+      }>;
+    }>;
+  }>) {
+    for (const para of block.paragraphs ?? []) {
+      for (const line of para.lines ?? []) {
+        for (const word of line.words ?? []) {
+          if (!/[\dAPMapmFM]/i.test(word.text)) continue;
+          words.push({
+            text: word.text,
+            x: (word.bbox.x0 + word.bbox.x1) / 2,
+            y: (word.bbox.y0 + word.bbox.y1) / 2,
+            confidence: word.confidence,
+          });
+        }
+      }
+    }
+  }
+
+  return words;
+}
+
+function clusterWordsIntoRows(words: OcrWordBox[], yThreshold: number): OcrWordBox[][] {
+  if (words.length === 0) return [];
+
+  const sorted = [...words].sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows: OcrWordBox[][] = [[sorted[0]]];
+  let rowY = sorted[0].y;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const word = sorted[i];
+    if (Math.abs(word.y - rowY) <= yThreshold) {
+      rows[rows.length - 1].push(word);
+    } else {
+      rows.push([word]);
+      rowY = word.y;
+    }
+  }
+
+  return rows;
+}
+
+/** Use Tesseract word positions: left column = IN, right column = OUT. */
+function parsePunchesFromWordGrid(
+  blocks: unknown,
+  imageWidth: number,
+  dateForParsing: string,
+  refDate: Date
+): OcrResult["punches"] {
+  const words = extractWordBoxes(blocks);
+  if (words.length === 0) return [];
+
+  const midX = imageWidth / 2;
+  const yThreshold = Math.max(28, imageWidth * 0.055);
+  const rows = clusterWordsIntoRows(words, yThreshold);
+  const punches: OcrResult["punches"] = [];
+
+  for (const row of rows) {
+    const left = row
+      .filter((w) => w.x < midX)
+      .sort((a, b) => a.x - b.x)
+      .map((w) => w.text)
+      .join(" ");
+    const right = row
+      .filter((w) => w.x >= midX)
+      .sort((a, b) => a.x - b.x)
+      .map((w) => w.text)
+      .join(" ");
+
+    const leftTimes = extractTimesFromLine(left);
+    const rightTimes = extractTimesFromLine(right);
+
+    if (leftTimes[0]) pushPunch(punches, "IN", leftTimes[0], dateForParsing, refDate);
+    if (rightTimes[0]) pushPunch(punches, "OUT", rightTimes[0], dateForParsing, refDate);
+  }
+
+  return dedupePunches(punches);
+}
+
+export function scoreOcrPunches(punches: OcrResult["punches"]): number {
+  if (punches.length === 0) return 0;
+
+  let score = punches.length * 10;
+  if (punches.length % 2 === 0) score += 8;
+  if (punches.length >= 6) score += 12;
+
+  for (let i = 0; i < punches.length; i++) {
+    const expected = i % 2 === 0 ? "IN" : "OUT";
+    if (punches[i].type === expected) score += 3;
+    if (punches[i].timestamp) score += 2;
+  }
+
+  return score;
+}
+
+export function pickBestOcrResult(...results: OcrResult[]): OcrResult {
+  if (results.length === 0) {
+    return parseOcrText("");
+  }
+  return results.reduce((best, current) =>
+    scoreOcrPunches(current.punches) > scoreOcrPunches(best.punches) ? current : best
+  );
 }
 
 export interface OcrResult {
@@ -382,7 +570,11 @@ function extractLocation(text: string): string | null {
   return null;
 }
 
-export function parseOcrText(text: string, referenceDate?: Date): OcrResult {
+export function parseOcrText(
+  text: string,
+  referenceDate?: Date,
+  spatial?: { blocks?: unknown; imageWidth?: number }
+): OcrResult {
   const normalized = normalizeOcrLayout(text);
   const { dateKey, label } = inferDateFromText(normalized);
   const refDate = referenceDate ?? new Date();
@@ -390,18 +582,41 @@ export function parseOcrText(text: string, referenceDate?: Date): OcrResult {
     dateKey ??
     `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, "0")}-${String(refDate.getDate()).padStart(2, "0")}`;
 
-  const times = refineTimes(extractTimes(normalized));
+  const readingOrderTimes = collectTimesInReadingOrder(normalized);
+  const blockPunches =
+    spatial?.blocks && spatial.imageWidth
+      ? parsePunchesFromWordGrid(
+          spatial.blocks,
+          spatial.imageWidth,
+          dateForParsing,
+          refDate
+        )
+      : [];
   const linePunches = parsePunchesFromLines(normalized, dateForParsing, refDate);
-  const gridPunches = parseGridFromLines(normalized, dateForParsing, refDate);
-  const punches =
-    gridPunches.length >= linePunches.length ? gridPunches : linePunches;
+  const gridPunches = assignAttendanceTypes(
+    readingOrderTimes,
+    dateForParsing,
+    refDate
+  );
 
-  // Fallback when line layout yields nothing but times exist globally
-  if (punches.length === 0 && times.length > 0) {
-    for (let i = 0; i < times.length; i++) {
-      const type: PunchType = i % 2 === 0 ? "IN" : "OUT";
-      pushPunch(punches, type, times[i], dateForParsing, refDate);
-    }
+  const candidates = [blockPunches, linePunches, gridPunches].filter(
+    (p) => p.length > 0
+  );
+  const punches =
+    candidates.length > 0
+      ? candidates.reduce((best, current) =>
+          scoreOcrPunches(current) > scoreOcrPunches(best) ? current : best
+        )
+      : [];
+
+  if (punches.length === 0 && readingOrderTimes.length > 0) {
+    return {
+      dateKey: dateKey ?? dateForParsing,
+      dateLabel: label,
+      location: extractLocation(normalized),
+      punches: assignAttendanceTypes(readingOrderTimes, dateForParsing, refDate),
+      rawText: normalized,
+    };
   }
 
   const valid = dedupePunches(punches);
@@ -415,31 +630,89 @@ export function parseOcrText(text: string, referenceDate?: Date): OcrResult {
   };
 }
 
-async function preprocessImage(imageData: Buffer): Promise<Buffer> {
+const OCR_WHITELIST =
+  "0123456789:.,APMapmFMMISSINGGayatriTechnopark()AugJanFebMarAprMayJunJulSepOctNovDec/- ";
+const OCR_PSMS = ["11", "6", "4", "13"] as const;
+
+async function preprocessImageVariants(
+  imageData: Buffer
+): Promise<Array<{ buffer: Buffer; width: number }>> {
   const { Jimp } = await import("jimp");
   const image = await Jimp.read(imageData);
-  const scale = image.width < 400 ? 4 : image.width < 800 ? 3 : 2;
-  image
-    .scale(scale)
-    .greyscale()
-    .contrast(0.35)
-    .normalize();
-  return image.getBuffer("image/png");
+  const baseScale = image.width < 400 ? 4 : image.width < 800 ? 3 : 2;
+
+  const variants: Array<{ buffer: Buffer; width: number }> = [];
+
+  const v1 = image.clone().scale(baseScale).greyscale().contrast(0.35).normalize();
+  variants.push({ buffer: await v1.getBuffer("image/png"), width: v1.width });
+
+  const v2 = image.clone().scale(baseScale).greyscale().contrast(0.55).brightness(0.04);
+  variants.push({ buffer: await v2.getBuffer("image/png"), width: v2.width });
+
+  const heavyScale = Math.max(baseScale, 3);
+  const v3 = image.clone().scale(heavyScale).greyscale().contrast(0.4).normalize();
+  variants.push({ buffer: await v3.getBuffer("image/png"), width: v3.width });
+
+  return variants;
 }
 
-async function recognizeText(imageData: Buffer, psm: string): Promise<string> {
-  const { createWorker, PSM } = await import("tesseract.js");
-  const worker = await createWorker("eng");
-  try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: psm as unknown as (typeof PSM)[keyof typeof PSM],
-      tessedit_char_whitelist: "0123456789:.,APMapmMISSINGGayatriTechnopark()AugJanFebMarAprMayJunJulSepOctNovDec/- ",
-    });
-    const { data } = await worker.recognize(imageData);
-    return data.text;
-  } finally {
-    await worker.terminate();
+type OcrWorker = Awaited<
+  ReturnType<(typeof import("tesseract.js"))["createWorker"]>
+>;
+
+async function recognizeWithWorker(
+  worker: OcrWorker,
+  imageData: Buffer | Blob,
+  psm: string
+): Promise<{ text: string; blocks: unknown; confidence: number }> {
+  const { PSM } = await import("tesseract.js");
+  await worker.setParameters({
+    tessedit_pageseg_mode: psm as unknown as (typeof PSM)[keyof typeof PSM],
+    tessedit_char_whitelist: OCR_WHITELIST,
+    user_defined_dpi: "300",
+  });
+  const { data } = await worker.recognize(imageData, {}, { blocks: true });
+  return {
+    text: data.text,
+    blocks: data.blocks,
+    confidence: data.confidence ?? 0,
+  };
+}
+
+async function runOcrCandidates(
+  images: Array<{ buffer: Buffer | Blob; width: number }>,
+  worker: OcrWorker
+): Promise<OcrResult | null> {
+  let best: OcrResult | null = null;
+  let bestScore = -1;
+
+  for (const image of images) {
+    for (const psm of OCR_PSMS) {
+      try {
+        const { text, blocks, confidence } = await recognizeWithWorker(
+          worker,
+          image.buffer,
+          psm
+        );
+        const parsed = parseOcrText(text, undefined, {
+          blocks,
+          imageWidth: image.width,
+        });
+        const score = scoreOcrPunches(parsed.punches) + confidence / 25;
+        if (score > bestScore) {
+          bestScore = score;
+          best = { ...parsed, rawText: text };
+        }
+        if (parsed.punches.length >= 6 && score >= 70) {
+          return best;
+        }
+      } catch {
+        // try next mode
+      }
+    }
   }
+
+  return best;
 }
 
 export async function runOcr(imageData: Buffer | string): Promise<OcrResult> {
@@ -450,104 +723,96 @@ export async function runOcr(imageData: Buffer | string): Promise<OcrResult> {
         "base64"
       );
 
-  let processed: Buffer;
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("eng");
   try {
-    processed = await preprocessImage(input);
-  } catch {
-    processed = input;
-  }
-
-  const psms = ["11", "6", "13", "7"];
-  let best: OcrResult | null = null;
-
-  for (const psm of psms) {
+    let variants: Array<{ buffer: Buffer; width: number }>;
     try {
-      const raw = await recognizeText(processed, psm);
-      const parsed = parseOcrText(raw);
-      if (!best || parsed.punches.length > best.punches.length) {
-        best = { ...parsed, rawText: raw };
-      }
-      if (parsed.punches.length >= 3) break;
+      variants = await preprocessImageVariants(input);
     } catch {
-      // try next mode
+      variants = [{ buffer: input, width: 800 }];
     }
-  }
 
-  if (best && best.punches.length > 0) return best;
-
-  for (const psm of psms) {
-    try {
-      const raw = await recognizeText(input, psm);
-      const parsed = parseOcrText(raw);
-      if (!best || parsed.punches.length > best.punches.length) {
-        best = { ...parsed, rawText: raw };
-      }
-    } catch {
-      // try next
+    const processedBest = await runOcrCandidates(variants, worker);
+    if (processedBest && processedBest.punches.length > 0) {
+      return processedBest;
     }
-  }
 
-  return best ?? parseOcrText("");
+    const originalBest = await runOcrCandidates(
+      [{ buffer: input, width: variants[0]?.width ?? 800 }],
+      worker
+    );
+    return originalBest ?? processedBest ?? parseOcrText("");
+  } finally {
+    await worker.terminate();
+  }
 }
 
-async function preprocessImageInBrowser(file: File | Blob): Promise<Blob> {
+async function preprocessImageInBrowser(
+  file: File | Blob
+): Promise<Array<{ blob: Blob; width: number }>> {
   const bitmap = await createImageBitmap(file);
-  const scale = bitmap.width < 400 ? 4 : bitmap.width < 800 ? 3 : 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width * scale;
-  canvas.height = bitmap.height * scale;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return file instanceof File ? file : new File([file], "ocr.png");
+  const baseScale = bitmap.width < 400 ? 4 : bitmap.width < 800 ? 3 : 2;
 
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const render = async (scale: number, contrastBoost: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width * scale;
+    canvas.height = bitmap.height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return {
+        blob: file instanceof File ? file : new File([file], "ocr.png"),
+        width: bitmap.width,
+      };
+    }
 
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const { data } = imageData;
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const boosted = gray < 128 ? gray * 0.85 : Math.min(255, gray * 1.15);
-    data[i] = data[i + 1] = data[i + 2] = boosted;
-  }
-  ctx.putImageData(imageData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const { data } = imageData;
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const normalized = Math.min(255, Math.max(0, (gray - 128) * contrastBoost + 128));
+      const boosted = normalized < 128 ? normalized * 0.88 : Math.min(255, normalized * 1.12);
+      data[i] = data[i + 1] = data[i + 2] = boosted;
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error("Failed to preprocess image"))),
+        "image/png"
+      );
+    });
+
+    return { blob, width: canvas.width };
+  };
+
+  const variants = await Promise.all([
+    render(baseScale, 1.35),
+    render(baseScale, 1.65),
+    render(Math.max(baseScale, 3), 1.45),
+  ]);
   bitmap.close();
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("Failed to preprocess image"))),
-      "image/png"
-    );
-  });
+  return variants;
 }
 
 export async function runOcrInBrowser(file: File | Blob): Promise<OcrResult> {
-  const { createWorker, PSM } = await import("tesseract.js");
+  const { createWorker } = await import("tesseract.js");
   const worker = await createWorker("eng");
   try {
-    let input: File | Blob = file;
+    let variants: Array<{ blob: Blob; width: number }>;
     try {
-      input = await preprocessImageInBrowser(file);
+      variants = await preprocessImageInBrowser(file);
     } catch {
-      // use original
+      variants = [{ blob: file, width: 800 }];
     }
 
-    const modes = [PSM.SPARSE_TEXT, PSM.SINGLE_BLOCK, PSM.RAW_LINE];
-    let best: OcrResult | null = null;
-
-    for (const psm of modes) {
-      await worker.setParameters({
-        tessedit_pageseg_mode: psm,
-        tessedit_char_whitelist:
-          "0123456789:.,APMapmMISSINGGayatriTechnopark()AugJanFebMarAprMayJunJulSepOctNovDec/- ",
-      });
-      const { data } = await worker.recognize(input);
-      const parsed = parseOcrText(data.text);
-      if (!best || parsed.punches.length > best.punches.length) {
-        best = { ...parsed, rawText: data.text };
-      }
-      if (parsed.punches.length >= 3) break;
-    }
-
+    const best = await runOcrCandidates(
+      variants.map((v) => ({ buffer: v.blob, width: v.width })),
+      worker
+    );
     return best ?? parseOcrText("");
   } finally {
     await worker.terminate();

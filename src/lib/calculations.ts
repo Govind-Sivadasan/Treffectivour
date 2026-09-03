@@ -138,7 +138,9 @@ export function getRequiredHours(
 }
 
 export function calculateFromPunches(
-  punches: Array<Pick<Punch, "id" | "type" | "timestamp" | "isManual">>,
+  punches: Array<
+    Pick<Punch, "id" | "type" | "timestamp" | "isManual"> & Partial<Pick<Punch, "sortOrder">>
+  >,
   options: {
     date: string;
     dayType?: DayType;
@@ -147,9 +149,12 @@ export function calculateFromPunches(
   }
 ): DaySummary {
   const now = options.now ?? new Date();
-  const sorted = [...punches].sort(
-    (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-  );
+  const sorted = [...punches].sort((a, b) => {
+    const orderA = a.sortOrder ?? 0;
+    const orderB = b.sortOrder ?? 0;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.timestamp.getTime() - b.timestamp.getTime();
+  });
 
   const pairs: DaySummary["pairs"] = [];
   let effectiveMs = 0;

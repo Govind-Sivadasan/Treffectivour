@@ -46,6 +46,33 @@ function parseSqlScript(sql) {
   return statements;
 }
 
+async function migratePunchSortOrder(client) {
+  const punchTable = await client.execute(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Punch'"
+  );
+  if (punchTable.rows.length === 0) {
+    return;
+  }
+
+  const columns = await client.execute('PRAGMA table_info("Punch")');
+  const hasSortOrder = columns.rows.some((row) => {
+    const name = row.name ?? row[1];
+    return name === "sortOrder";
+  });
+
+  if (hasSortOrder) {
+    return;
+  }
+
+  console.log('Turso migration — adding Punch.sortOrder…');
+  await client.execute(
+    'ALTER TABLE "Punch" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0'
+  );
+  await client.execute(
+    'CREATE INDEX IF NOT EXISTS "Punch_dayRecordId_sortOrder_idx" ON "Punch"("dayRecordId", "sortOrder")'
+  );
+}
+
 export async function ensureTursoSchema() {
   const turso = getTursoConfig();
   if (!turso) {
@@ -57,18 +84,18 @@ export async function ensureTursoSchema() {
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'User'"
   );
 
-  if (existing.rows.length > 0) {
-    return true;
+  if (existing.rows.length === 0) {
+    console.log("Turso has no schema yet — creating tables…");
+    const statements = parseSqlScript(loadInitSql());
+
+    for (const statement of statements) {
+      await client.execute(statement);
+    }
+
+    console.log(`Turso schema ready (${statements.length} statements).`);
   }
 
-  console.log("Turso has no schema yet — creating tables…");
-  const statements = parseSqlScript(loadInitSql());
-
-  for (const statement of statements) {
-    await client.execute(statement);
-  }
-
-  console.log(`Turso schema ready (${statements.length} statements).`);
+  await migratePunchSortOrder(client);
   return true;
 }
 

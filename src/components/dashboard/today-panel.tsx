@@ -6,7 +6,7 @@ import { ProgressRing, StatBadge } from "@/components/ui/progress-ring";
 import { formatDurationWithSeconds, formatHours, getLeaveTimeInfo } from "@/lib/calculations";
 import { formatDate, formatTime } from "@/lib/utils";
 import { LogIn } from "lucide-react";
-import { PunchEditRow } from "@/components/dashboard/punch-edit-row";
+import { PunchLogList } from "@/components/dashboard/punch-log-list";
 import { RequiredHoursControl } from "@/components/dashboard/required-hours-control";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -137,22 +137,18 @@ export function TodayPanel({ summary, loading, onRefresh, isToday = true }: Toda
       </div>
 
       <div className="mt-6 space-y-2">
-        <h4 className="text-sm font-medium text-[var(--color-muted)]">Punch log</h4>
-        {summary.punches.length === 0 ? (
-          <p className="text-sm text-[var(--color-muted)] py-4 text-center">
-            No punches yet. Upload a screenshot or add manually.
-          </p>
-        ) : (
-          summary.punches.map((p) => (
-            <PunchEditRow
-              key={p.id}
-              punch={p}
-              date={summary.date}
-              onSave={onRefresh}
-              onDelete={() => deletePunch(p.id)}
-            />
-          ))
-        )}
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-medium text-[var(--color-muted)]">Punch log</h4>
+          {summary.punches.length > 1 && (
+            <span className="text-[10px] text-[var(--color-muted)]">Drag to reorder</span>
+          )}
+        </div>
+        <PunchLogList
+          punches={summary.punches}
+          date={summary.date}
+          onSave={onRefresh}
+          onDelete={deletePunch}
+        />
       </div>
 
       {(summary.hasOpenSession || summary.pairs.some((p) => !p.out)) && (

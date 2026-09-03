@@ -15,6 +15,7 @@ import {
   ArrowUpRight,
   Check,
   Clock,
+  GripVertical,
   Pencil,
   Trash2,
   X,
@@ -34,9 +35,22 @@ interface PunchEditRowProps {
   date: string;
   onSave: () => void;
   onDelete: () => void;
+  draggable?: boolean;
+  isDragging?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: () => void;
 }
 
-export function PunchEditRow({ punch, date, onSave, onDelete }: PunchEditRowProps) {
+export function PunchEditRow({
+  punch,
+  date,
+  onSave,
+  onDelete,
+  draggable = false,
+  isDragging = false,
+  onDragStart,
+  onDragEnd,
+}: PunchEditRowProps) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [type, setType] = useState<"IN" | "OUT">(punch.type);
@@ -141,7 +155,26 @@ export function PunchEditRow({ punch, date, onSave, onDelete }: PunchEditRowProp
   }
 
   return (
-    <div className="grid grid-cols-[72px_1fr_auto] items-center gap-3 rounded-xl bg-black/30 border border-[var(--color-border)] px-4 py-3 group hover:bg-black/40 transition">
+    <div
+      className={cn(
+        "grid grid-cols-[auto_72px_1fr_auto] items-center gap-2 sm:gap-3 rounded-xl bg-black/30 border border-[var(--color-border)] px-3 sm:px-4 py-3 group hover:bg-black/40 transition",
+        isDragging && "opacity-50"
+      )}
+    >
+      <button
+        type="button"
+        draggable={draggable}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        className={cn(
+          "touch-none p-1 rounded-md text-[var(--color-muted)] hover:text-white hover:bg-white/10 cursor-grab active:cursor-grabbing",
+          !draggable && "opacity-30 cursor-not-allowed"
+        )}
+        aria-label="Drag to reorder punch"
+        disabled={!draggable}
+      >
+        <GripVertical className="w-4 h-4" />
+      </button>
       <div className="flex items-center gap-2">
         {punch.type === "IN" ? (
           <ArrowDownLeft className="w-4 h-4 shrink-0 text-[var(--color-success)]" />

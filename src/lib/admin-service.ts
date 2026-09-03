@@ -56,7 +56,7 @@ export async function getAdminOverview(now = new Date()) {
       role: true,
       dayRecords: {
         where: { date: { in: allDates } },
-        include: { punches: { orderBy: { timestamp: "asc" } } },
+        include: { punches: { orderBy: [{ sortOrder: "asc" }, { timestamp: "asc" }] } },
       },
     },
     orderBy: { name: "asc" },

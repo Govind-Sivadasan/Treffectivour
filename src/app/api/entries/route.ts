@@ -51,6 +51,12 @@ export async function POST(request: Request) {
       notes,
     });
 
+    const lastPunch = await prisma.punch.findFirst({
+      where: { dayRecordId: record.id },
+      orderBy: [{ sortOrder: "desc" }, { timestamp: "desc" }],
+      select: { sortOrder: true },
+    });
+
     let punchTime: Date;
     if (ts) {
       punchTime = new Date(ts);
@@ -66,6 +72,7 @@ export async function POST(request: Request) {
         dayRecordId: record.id,
         type,
         timestamp: punchTime,
+        sortOrder: (lastPunch?.sortOrder ?? -1) + 1,
         isManual: true,
       },
     });
@@ -133,9 +140,48 @@ export async function PATCH(request: Request) {
   try {
     const session = await requireSession();
     const body = await request.json();
-    const { date, dayType, requiredHours, notes } = body;
+    const { date, dayType, requiredHours, notes, punchOrder } = body as {
+      date?: string;
+      dayType?: DayType;
+      requiredHours?: number;
+      notes?: string;
+      punchOrder?: string[];
+    };
 
     if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
+
+    if (punchOrder) {
+      if (!Array.isArray(punchOrder) || punchOrder.length === 0) {
+        return NextResponse.json({ error: "punchOrder required" }, { status: 400 });
+      }
+
+      const record = await getOrCreateDayRecord(session.id, date);
+      const punches = await prisma.punch.findMany({
+        where: { dayRecordId: record.id, userId: session.id },
+        select: { id: true },
+      });
+
+      if (punches.length !== punchOrder.length) {
+        return NextResponse.json({ error: "Invalid punch order" }, { status: 400 });
+      }
+
+      const knownIds = new Set(punches.map((p) => p.id));
+      if (punchOrder.some((id) => !knownIds.has(id))) {
+        return NextResponse.json({ error: "Invalid punch order" }, { status: 400 });
+      }
+
+      await prisma.$transaction(
+        punchOrder.map((id, index) =>
+          prisma.punch.update({
+            where: { id },
+            data: { sortOrder: index },
+          })
+        )
+      );
+
+      const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));
+      return NextResponse.json({ summary });
+    }
 
     await getOrCreateDayRecord(session.id, date, { dayType, requiredHours, notes });
     const summary = await getDaySummary(session.id, date, getEffectiveNowForDate(date));

@@ -13,7 +13,7 @@ async function saveOcrPunches(
   const record = await getOrCreateDayRecord(userId, date);
   await prisma.punch.deleteMany({ where: { dayRecordId: record.id } });
 
-  for (const punch of ocr.punches) {
+  for (const [index, punch] of ocr.punches.entries()) {
     if (!punch.timestamp) continue;
     await prisma.punch.create({
       data: {
@@ -21,6 +21,7 @@ async function saveOcrPunches(
         dayRecordId: record.id,
         type: punch.type,
         timestamp: punch.timestamp,
+        sortOrder: index,
         isManual: false,
       },
     });

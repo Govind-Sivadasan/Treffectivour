@@ -32,7 +32,7 @@ export async function getOrCreateDayRecord(
         : {}),
       ...(overrides?.notes !== undefined ? { notes: overrides.notes } : {}),
     },
-    include: { punches: { orderBy: { timestamp: "asc" } } },
+    include: { punches: { orderBy: [{ sortOrder: "asc" }, { timestamp: "asc" }] } },
   });
 }
 
@@ -77,7 +77,7 @@ export async function getSummariesForRange(
 ) {
   const records = await prisma.dayRecord.findMany({
     where: { userId, date: { in: dates } },
-    include: { punches: { orderBy: { timestamp: "asc" } } },
+    include: { punches: { orderBy: [{ sortOrder: "asc" }, { timestamp: "asc" }] } },
   });
 
   const recordMap = new Map(records.map((r) => [r.date, r]));

@@ -60,11 +60,13 @@ model Punch {
   dayRecordId String
   type        PunchType
   timestamp   DateTime
+  sortOrder   Int        @default(0)
   isManual    Boolean    @default(false)
   createdAt   DateTime   @default(now())
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   dayRecord   DayRecord  @relation(fields: [dayRecordId], references: [id], onDelete: Cascade)
 
+  @@index([dayRecordId, sortOrder])
   @@index([dayRecordId, timestamp])
 }
 

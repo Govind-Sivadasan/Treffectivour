@@ -61,23 +61,28 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
       setLoading(true);
 
       try {
-        const { runOcrInBrowser } = await import("@/lib/ocr");
+        const { runOcrInBrowser, pickBestOcrResult } = await import("@/lib/ocr");
         toast.message("Reading screenshot…", { duration: 2000 });
 
-        let ocr = await runOcrInBrowser(file);
-
-        if (ocr.punches.length === 0) {
+        const browserPromise = runOcrInBrowser(file);
+        const serverPromise = (async () => {
           const form = new FormData();
           form.append("image", file);
           form.append("date", overrideDate);
           const res = await fetch("/api/ocr", { method: "POST", body: form });
+          if (!res.ok) return null;
           const data = await res.json();
-          if (!res.ok) {
-            toast.error(data.error || "OCR failed");
-            return;
-          }
-          ocr = data.ocr;
-        }
+          return data.ocr as Awaited<ReturnType<typeof runOcrInBrowser>> | null;
+        })();
+
+        const [browserOcr, serverOcr] = await Promise.all([
+          browserPromise,
+          serverPromise,
+        ]);
+
+        const ocr = serverOcr
+          ? pickBestOcrResult(browserOcr, serverOcr)
+          : browserOcr;
 
         const dayKey = overrideDate || ocr.dateKey;
         if (!dayKey) {
@@ -294,6 +299,16 @@ export function OcrUpload({ date, onSuccess }: OcrUploadProps) {
               <p className="text-sm font-medium text-[var(--color-accent)]">
                 Extracted punches — confirm before saving
               </p>
+              {pending.rawText.trim() && (
+                <details className="text-xs text-[var(--color-muted)]">
+                  <summary className="cursor-pointer hover:text-white">
+                    Raw OCR text (for debugging)
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/40 p-2 font-mono text-[10px] leading-relaxed">
+                    {pending.rawText.trim()}
+                  </pre>
+                </details>
+              )}
               <ul className="space-y-2">
                 {pending.punches.map((p, idx) => (
                   <li
